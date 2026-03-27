@@ -1,0 +1,14 @@
+{
+  "name": "@rolefitai/types",
+  "version": "0.1.0",
+  "description": "Shared TypeScript types for RoleFitAI",
+  "main": "index.ts",
+  "types": "index.ts",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

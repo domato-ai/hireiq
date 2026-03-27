@@ -1,0 +1,17 @@
+{
+  "name": "@rolefitai/prompts",
+  "version": "0.1.0",
+  "description": "LLM prompt templates for RoleFitAI",
+  "main": "index.ts",
+  "types": "index.ts",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rolefitai/types": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}

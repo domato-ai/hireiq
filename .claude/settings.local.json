@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:chatgpt.com)",
+      "Bash(git init:*)",
+      "Bash(py:*)",
+      "Bash(npm install:*)",
+      "Bash(ls:*)",
+      "Bash(taskkill //F //PID 34608)",
+      "Bash(taskkill //F //IM node.exe //FI \"WINDOWTITLE eq npm\")",
+      "Bash(npx next:*)",
+      "WebFetch(domain:www.todesktop.com)",
+      "WebFetch(domain:openclaw.ai)"
+    ]
+  }
+}

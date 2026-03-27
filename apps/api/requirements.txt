@@ -1,0 +1,17 @@
+fastapi[standard]
+uvicorn[standard]
+sqlalchemy[asyncio]
+asyncpg
+alembic
+pydantic
+pydantic-settings
+python-multipart
+azure-storage-blob
+azure-identity
+stripe
+pgvector
+python-jose[cryptography]
+httpx
+tenacity
+pypdf
+python-docx

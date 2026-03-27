@@ -1,0 +1,21 @@
+{
+  "name": "@rolefitai/ui",
+  "version": "0.1.0",
+  "description": "Shared UI components for RoleFitAI",
+  "main": "index.ts",
+  "types": "index.ts",
+  "private": true,
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rolefitai/types": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  },
+  "peerDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  }
+}

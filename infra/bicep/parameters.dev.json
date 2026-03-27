@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environmentName": {
+      "value": "dev"
+    },
+    "location": {
+      "value": "eastus"
+    },
+    "postgresAdminLogin": {
+      "value": "hireiqadmin"
+    },
+    "postgresAdminPassword": {
+      "reference": {
+        "keyVault": {
+          "id": "/subscriptions/YOUR_SUBSCRIPTION_ID/resourceGroups/rg-hireiq-dev/providers/Microsoft.KeyVault/vaults/kv-hireiq-dev"
+        },
+        "secretName": "postgres-admin-password"
+      }
+    },
+    "appServiceSkuName": {
+      "value": "B1"
+    },
+    "postgresSku": {
+      "value": "Standard_B1ms"
+    }
+  }
+}

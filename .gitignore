@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build outputs
+.next/
+out/
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Azure
+.azure/
+
+# Testing
+coverage/
+htmlcov/
+.pytest_cache/
+.coverage
+
+# Logs
+*.log
+logs/
+
+# Secrets
+*.pem
+*.key
+credentials.json
