@@ -253,6 +253,16 @@
 .home-stagger-4 { animation: home-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.5s both; }
 .home-stagger-5 { animation: home-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.6s both; }
 
+/* Candidate card stagger entry */
+@keyframes candidate-card-enter {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.candidate-card-enter {
+  animation: candidate-card-enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 /* Analyzing spinner */
 @keyframes spin-slow {
   to { transform: rotate(360deg); }
