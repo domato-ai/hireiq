@@ -13,8 +13,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  // Standalone output for containerized deployments
-  // output: "standalone",
+  output: "export",
 };
 
 export default nextConfig;

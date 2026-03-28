@@ -1,24 +1,15 @@
-import { redirect } from "next/navigation";
-import { getRolesByWorkspace } from "@/lib/mock-data";
+import { MOCK_WORKSPACES, MOCK_ROLES, getRolesByWorkspace } from "@/lib/mock-data";
+import { ClientRedirect } from "./client-redirect";
 
-interface WorkspacePageProps {
-  params: Promise<{ workspaceId: string }>;
+export function generateStaticParams() {
+  return MOCK_WORKSPACES.map((ws) => ({ workspaceId: ws.id }));
 }
 
-/**
- * Workspace index — redirect to the first role.
- * Uses mock data in development; swap for API call when backend is ready.
- */
-export default async function WorkspacePage({ params }: WorkspacePageProps) {
-  const { workspaceId } = await params;
+export default function WorkspacePage({ params }: { params: { workspaceId: string } }) {
+  const roles = getRolesByWorkspace(params.workspaceId);
+  const target = roles.length > 0
+    ? `/workspaces/${params.workspaceId}/roles/${roles[0].id}`
+    : "/workspaces";
 
-  const roles = getRolesByWorkspace(workspaceId);
-  const firstRole = roles[0];
-
-  if (firstRole) {
-    redirect(`/workspaces/${workspaceId}/roles/${firstRole.id}`);
-  }
-
-  // Fallback if no roles exist yet
-  redirect(`/workspaces`);
+  return <ClientRedirect to={target} />;
 }
