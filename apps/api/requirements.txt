@@ -13,5 +13,7 @@ pgvector
 python-jose[cryptography]
 httpx
 tenacity
+gunicorn
+openai
 pypdf
 python-docx

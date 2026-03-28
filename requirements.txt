@@ -1,0 +1,3 @@
+# Root requirements file for Azure App Service Oryx build
+# Points to the actual API requirements
+-r apps/api/requirements.txt
