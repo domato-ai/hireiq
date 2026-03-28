@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.database import engine
+from app.database import get_engine
 from app.routers import auth, billing, candidates, roles, uploads, workspaces
 
 logger = logging.getLogger(__name__)
@@ -45,18 +45,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.environment,
     )
 
-    # Verify database connectivity (non-fatal in dev)
-    try:
-        async with engine.connect() as conn:
-            await conn.execute(__import__("sqlalchemy").text("SELECT 1"))
-        logger.info("Database connection: OK")
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Database connectivity check failed: %s", exc)
+    # Verify database connectivity (non-fatal, skip if no real DB configured)
+    if "localhost" not in settings.database_url or settings.environment != "development":
+        try:
+            from sqlalchemy import text
+            async with get_engine().connect() as conn:
+                await conn.execute(text("SELECT 1"))
+            logger.info("Database connection: OK")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Database connectivity check failed: %s", exc)
+    else:
+        logger.info("Skipping DB check in local dev (no database configured)")
 
     yield  # Application runs here
 
     logger.info("Shutting down — disposing database engine.")
-    await engine.dispose()
+    await get_engine().dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +148,7 @@ def create_app() -> FastAPI:
         from sqlalchemy import text  # local import to keep startup clean
 
         try:
-            async with engine.connect() as conn:
+            async with get_engine().connect() as conn:
                 await conn.execute(text("SELECT 1"))
             return {"status": "ready"}
         except Exception as exc:
