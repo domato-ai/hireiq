@@ -45,17 +45,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.environment,
     )
 
-    # Verify database connectivity (non-fatal, skip if no real DB configured)
-    if "localhost" not in settings.database_url or settings.environment != "development":
-        try:
-            from sqlalchemy import text
+    # Verify database connectivity (non-fatal, with timeout)
+    import asyncio
+    try:
+        from sqlalchemy import text
+
+        async def _db_check():
             async with get_engine().connect() as conn:
                 await conn.execute(text("SELECT 1"))
-            logger.info("Database connection: OK")
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Database connectivity check failed: %s", exc)
-    else:
-        logger.info("Skipping DB check in local dev (no database configured)")
+
+        await asyncio.wait_for(_db_check(), timeout=5.0)
+        logger.info("Database connection: OK")
+    except asyncio.TimeoutError:
+        logger.warning("Database connectivity check timed out (5s) — continuing without DB")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Database connectivity check failed: %s — continuing anyway", exc)
 
     yield  # Application runs here
 
