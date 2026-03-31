@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     algorithm: str = "RS256"
 
     # ------------------------------------------------------------------ #
+    # Azure OpenAI
+    # ------------------------------------------------------------------ #
+    azure_openai_endpoint: str = ""
+    azure_openai_api_key: str = ""
+    azure_openai_api_version: str = "2024-06-01"
+    azure_openai_deployment_mini: str = "gpt-4o-mini"
+    azure_openai_deployment_embedding: str = "text-embedding-3-small"
+
+    # ------------------------------------------------------------------ #
     # Plan limits (free tier)
     # ------------------------------------------------------------------ #
     free_tier_max_candidates_per_role: int = 10

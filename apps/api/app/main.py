@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.database import get_engine
-from app.routers import auth, billing, candidates, roles, uploads, workspaces
+from app.routers import analyze, auth, billing, candidates, roles, uploads, workspaces
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,7 @@ def create_app() -> FastAPI:
     app.include_router(candidates.router, prefix=API_PREFIX)
     app.include_router(uploads.router, prefix=API_PREFIX)
     app.include_router(billing.router, prefix=API_PREFIX)
+    app.include_router(analyze.router, prefix=API_PREFIX)
 
     # ------------------------------------------------------------------
     # Health check

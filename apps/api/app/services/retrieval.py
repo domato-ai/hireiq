@@ -39,46 +39,30 @@ DEFAULT_TOP_K = 20
 
 
 async def retrieve_top_candidates(
-    role_id: uuid.UUID,
-    query_text: str,
+    role_id,
+    query_embedding: list[float],
     db: AsyncSession,
     top_k: int = DEFAULT_TOP_K,
 ) -> list[dict[str, Any]]:
-    """
-    Find the ``top_k`` candidates for a role ranked by cosine similarity to
-    ``query_text`` (typically the job description).
+    """Retrieve top K candidates by cosine similarity to the query embedding."""
+    sql = text("""
+        SELECT id, name,
+               1 - (embedding <=> :vec::vector) AS similarity
+        FROM candidates
+        WHERE role_id = :role_id
+          AND embedding IS NOT NULL
+          AND status = 'scored'
+        ORDER BY embedding <=> :vec::vector
+        LIMIT :top_k
+    """)
 
-    Args:
-        role_id: UUID of the role whose candidates to search.
-        query_text: Text to embed and use as the similarity anchor.
-        db: Async database session.
-        top_k: Maximum number of candidates to return.
+    result = await db.execute(sql, {
+        "role_id": str(role_id),
+        "vec": str(query_embedding),
+        "top_k": top_k,
+    })
 
-    Returns:
-        List of dicts with ``candidate_id`` and ``similarity`` keys,
-        ordered from most to least similar.
-
-    TODO:
-        query_vector = await generate(query_text)
-        sql = text(\"\"\"
-            SELECT id, 1 - (embedding <=> :vec) AS similarity
-            FROM candidates
-            WHERE role_id = :role_id
-              AND embedding IS NOT NULL
-            ORDER BY embedding <=> :vec
-            LIMIT :top_k
-        \"\"\")
-        result = await db.execute(
-            sql,
-            {"vec": str(query_vector), "role_id": str(role_id), "top_k": top_k},
-        )
-        return [{"candidate_id": row.id, "similarity": row.similarity} for row in result]
-    """
-    logger.warning(
-        "pgvector retrieval is not yet implemented — returning empty list for role %s.",
-        role_id,
-    )
-    return []
+    return [{"id": row.id, "name": row.name, "similarity": row.similarity} for row in result]
 
 
 async def retrieve_similar_candidates(

@@ -49,46 +49,35 @@ async def generate(text: str) -> list[float]:
 
     Raises:
         EmbeddingError: If the embedding API call fails after retries.
-
-    TODO:
-        from openai import AsyncAzureOpenAI
-        client = AsyncAzureOpenAI(
-            azure_endpoint=settings.azure_openai_endpoint,
-            api_key=settings.azure_openai_api_key,
-            api_version="2024-02-01",
-        )
-        response = await client.embeddings.create(
-            input=text,
-            model=settings.azure_openai_embedding_deployment,
-        )
-        return response.data[0].embedding
     """
-    logger.warning(
-        "Embedding generation is not yet implemented — returning zero vector for %d chars.",
-        len(text),
-    )
-    return [0.0] * EMBEDDING_DIM
+    from app.services.llm import embed
+
+    results = await embed([text])
+    return results[0]
 
 
 async def generate_batch(texts: list[str]) -> list[list[float]]:
     """
     Generate embeddings for a batch of texts.
 
-    Batching reduces API round-trips. Azure OpenAI supports up to 2048
-    items per request for ``text-embedding-ada-002``.
+    Batching reduces API round-trips. Azure OpenAI supports up to 16 items
+    per chunk to stay within safe request limits.
 
     Args:
         texts: List of text strings to embed.
 
     Returns:
         List of embedding vectors in the same order as the input.
-
-    TODO: Implement batched API call with chunk splitting for large inputs.
     """
-    results: list[list[float]] = []
-    for text in texts:
-        results.append(await generate(text))
-    return results
+    from app.services.llm import embed
+
+    # Azure OpenAI has a batch limit; process in chunks of 16
+    all_embeddings: list[list[float]] = []
+    for i in range(0, len(texts), 16):
+        batch = texts[i : i + 16]
+        results = await embed(batch)
+        all_embeddings.extend(results)
+    return all_embeddings
 
 
 def content_hash(text: str) -> str:
