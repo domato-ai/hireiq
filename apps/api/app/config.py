@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # CORS
     # ------------------------------------------------------------------ #
-    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
+    cors_origins: str = "http://localhost:3000,http://localhost:5173"
 
     # ------------------------------------------------------------------ #
     # Security / JWT
@@ -75,12 +75,9 @@ class Settings(BaseSettings):
     free_tier_max_roles_per_workspace: int = 3
     free_tier_max_workspaces: int = 1
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
-        if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
-        return v
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @field_validator("azure_ad_scopes", mode="before")
     @classmethod
