@@ -4,11 +4,44 @@ import { useState, useRef, useCallback } from "react";
 import Link from "next/link";
 import { NavLogo } from "@/components/ui/logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import { MOCK_CANDIDATES, type Candidate, type FactorScore } from "@/lib/mock-data";
+
+/* ─── API ────────────────────────────────────────────────────────────────── */
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://ca-hireiq-api-dev.delightfulsea-504dfc83.australiaeast.azurecontainerapps.io";
 
 /* ─── Types ─────────────────────────────────────────────────────────────── */
 
 type Step = "idle" | "analyzing" | "results";
+
+interface FactorScores {
+  skills_match: number;
+  experience_years: number;
+  education_match: number;
+  title_proximity: number;
+  location_match: number;
+}
+
+interface CandidateResult {
+  id: string;
+  name: string | null;
+  current_title: string | null;
+  current_company: string | null;
+  location: string | null;
+  years_experience: number | null;
+  overall_score: number;
+  factor_scores: FactorScores;
+  strengths: string[];
+  risks: string[];
+  missing_evidence: string[];
+}
+
+interface AnalysisResult {
+  analysis_id: string;
+  jd_requirements: Record<string, unknown>;
+  candidates: CandidateResult[];
+  total_processed: number;
+  total_skipped: number;
+}
 
 /* ─── Main page ─────────────────────────────────────────────────────────── */
 
@@ -19,6 +52,8 @@ export default function HomePage() {
   const [files, setFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
   const [step, setStep] = useState<Step>("idle");
+  const [error, setError] = useState("");
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [compareMode, setCompareMode] = useState(false);
@@ -30,8 +65,10 @@ export default function HomePage() {
   const hasFiles = files.length > 0;
   const canStart = hasJD && hasFiles;
 
-  const sortedCandidates = [...MOCK_CANDIDATES].sort((a, b) => b.overallScore - a.overallScore);
-  const topCandidate = sortedCandidates[0];
+  const sortedCandidates = analysisResult
+    ? [...analysisResult.candidates].sort((a, b) => b.overall_score - a.overall_score)
+    : [];
+  const topCandidate = sortedCandidates[0] ?? null;
 
   const handleFiles = useCallback((newFiles: FileList | File[]) => {
     const valid = Array.from(newFiles).filter((f) =>
@@ -57,21 +94,55 @@ export default function HomePage() {
     setFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleStart = () => {
+  const handleStart = async () => {
     setStep("analyzing");
+    setError("");
     setExpandedId(null);
     setSelectedIds(new Set());
     setCompareMode(false);
-    setTimeout(() => {
+
+    try {
+      let jdContent = jdText;
+      if (jdMode === "upload" && jdFile) {
+        jdContent = await jdFile.text();
+      }
+
+      const formData = new FormData();
+      formData.append("jd_text", jdContent);
+
+      for (const file of files) {
+        formData.append("files", file);
+      }
+
+      const response = await fetch(`${API_URL}/api/v1/analyze`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ detail: "Analysis failed" }));
+        throw new Error(err.detail || `Error ${response.status}`);
+      }
+
+      const data = await response.json();
+      setAnalysisResult(data);
       setStep("results");
       setTimeout(() => {
         resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
-    }, 2400);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+      setStep("idle");
+    }
   };
 
   const handleReset = () => {
     setStep("idle");
+    setAnalysisResult(null);
+    setJdText("");
+    setJdFile(null);
+    setFiles([]);
+    setError("");
     setExpandedId(null);
     setSelectedIds(new Set());
     setCompareMode(false);
@@ -177,6 +248,16 @@ export default function HomePage() {
             : "Paste a job description, upload resumes, and get an evidence-backed shortlist in seconds."}
         </p>
 
+        {/* ── Error banner ── */}
+        {error && (
+          <div
+            className="w-full max-w-[640px] mb-4 px-4 py-3 rounded-xl text-sm"
+            style={{ background: "var(--error-bg)", border: "1px solid var(--error-border)", color: "var(--error-text)" }}
+          >
+            {error}
+          </div>
+        )}
+
         {/* ── Main card ── */}
         <div
           className="w-full max-w-[640px] mt-12 rounded-2xl p-5 home-stagger-3"
@@ -220,9 +301,9 @@ export default function HomePage() {
                   <span className="text-[13px]" style={{ color: "var(--text-muted)" }}>
                     Top match:{" "}
                     <span className="font-semibold" style={{ color: "var(--text-heading)" }}>
-                      {topCandidate.name}
+                      {topCandidate?.name ?? "Unknown"}
                     </span>{" "}
-                    <span style={{ color: "#a78bfa" }}>({topCandidate.overallScore}/100)</span>
+                    <span style={{ color: "#a78bfa" }}>({topCandidate?.overall_score ?? 0}/100)</span>
                   </span>
                 </div>
                 <button
@@ -537,7 +618,7 @@ function CandidateCard({
   onToggleSelect,
   animDelay,
 }: {
-  candidate: Candidate;
+  candidate: CandidateResult;
   rank: number;
   isExpanded: boolean;
   isSelected: boolean;
@@ -545,13 +626,7 @@ function CandidateCard({
   onToggleSelect: (e: React.MouseEvent) => void;
   animDelay: number;
 }) {
-  const scoreColor = candidate.overallScore >= 75 ? "#34d399" : candidate.overallScore >= 50 ? "#f59e0b" : "#f87171";
-  const scoreBg =
-    candidate.overallScore >= 75
-      ? "rgba(52,211,153,0.1)"
-      : candidate.overallScore >= 50
-      ? "rgba(245,158,11,0.1)"
-      : "rgba(248,113,113,0.1)";
+  const scoreColor = candidate.overall_score >= 75 ? "#34d399" : candidate.overall_score >= 50 ? "#f59e0b" : "#f87171";
 
   return (
     <div
@@ -596,10 +671,10 @@ function CandidateCard({
         {/* Name + title */}
         <div className="flex-1 min-w-0">
           <p className="text-[14px] font-semibold leading-tight truncate" style={{ color: "var(--text-heading)" }}>
-            {candidate.name}
+            {candidate.name ?? "Unknown Candidate"}
           </p>
           <p className="text-[12px] truncate mt-0.5" style={{ color: "var(--text-muted)" }}>
-            {candidate.currentTitle} @ {candidate.currentCompany}
+            {candidate.current_title ?? "—"} @ {candidate.current_company ?? "—"}
           </p>
         </div>
 
@@ -610,7 +685,7 @@ function CandidateCard({
               className="font-display text-[18px] font-normal leading-none"
               style={{ color: scoreColor }}
             >
-              {candidate.overallScore}
+              {candidate.overall_score}
             </span>
             <span className="text-[10px]" style={{ color: "var(--text-faint)" }}>
               /100
@@ -620,7 +695,7 @@ function CandidateCard({
             <div
               className="h-full rounded-full score-bar-fill"
               style={{
-                width: `${candidate.overallScore}%`,
+                width: `${candidate.overall_score}%`,
                 background: scoreColor,
                 opacity: 0.8,
               }}
@@ -668,8 +743,12 @@ function CandidateCard({
                 Factor Scores
               </p>
               <div className="space-y-2.5">
-                {candidate.factorScores.map((fs) => (
-                  <FactorRow key={fs.factorId} factor={fs} />
+                {Object.entries(candidate.factor_scores).map(([key, score]) => (
+                  <FactorRow
+                    key={key}
+                    label={key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                    score={score}
+                  />
                 ))}
               </div>
             </div>
@@ -709,13 +788,13 @@ function CandidateCard({
             </div>
 
             {/* Missing evidence */}
-            {candidate.missingEvidence.length > 0 && (
+            {candidate.missing_evidence.length > 0 && (
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>
                   Missing Evidence
                 </p>
                 <div className="flex flex-wrap gap-1.5">
-                  {candidate.missingEvidence.map((m, i) => (
+                  {candidate.missing_evidence.map((m, i) => (
                     <Tag key={i} text={m} variant="amber" />
                   ))}
                 </div>
@@ -753,14 +832,11 @@ function CandidateCard({
 
 /* ─── CompareView ────────────────────────────────────────────────────────── */
 
-function CompareView({ candidates, onClose }: { candidates: Candidate[]; onClose: () => void }) {
-  // Collect all unique factor labels from selected candidates
-  const allFactorIds = Array.from(
-    new Set(candidates.flatMap((c) => c.factorScores.map((f) => f.factorId)))
+function CompareView({ candidates, onClose }: { candidates: CandidateResult[]; onClose: () => void }) {
+  // Collect all unique factor keys from selected candidates
+  const allFactorKeys = Array.from(
+    new Set(candidates.flatMap((c) => Object.keys(c.factor_scores)))
   );
-
-  const getFactorScore = (candidate: Candidate, factorId: string): FactorScore | undefined =>
-    candidate.factorScores.find((f) => f.factorId === factorId);
 
   return (
     <div
@@ -804,18 +880,18 @@ function CompareView({ candidates, onClose }: { candidates: Candidate[]; onClose
           >
             <div />
             {candidates.map((c) => {
-              const scoreColor = c.overallScore >= 75 ? "#34d399" : c.overallScore >= 50 ? "#f59e0b" : "#f87171";
+              const scoreColor = c.overall_score >= 75 ? "#34d399" : c.overall_score >= 50 ? "#f59e0b" : "#f87171";
               return (
                 <div key={c.id} className="px-3">
                   <p className="text-[13px] font-semibold truncate" style={{ color: "var(--text-heading)" }}>
-                    {c.name}
+                    {c.name ?? "Unknown"}
                   </p>
                   <p className="text-[11px] truncate mt-0.5" style={{ color: "var(--text-muted)" }}>
-                    {c.currentTitle}
+                    {c.current_title ?? "—"}
                   </p>
                   <div className="flex items-center gap-1.5 mt-2">
                     <span className="font-display text-[22px] leading-none" style={{ color: scoreColor }}>
-                      {c.overallScore}
+                      {c.overall_score}
                     </span>
                     <span className="text-[10px]" style={{ color: "var(--text-faint)" }}>
                       /100
@@ -827,11 +903,11 @@ function CompareView({ candidates, onClose }: { candidates: Candidate[]; onClose
           </div>
 
           {/* Factor rows */}
-          {allFactorIds.map((factorId, idx) => {
-            const label = candidates.flatMap((c) => c.factorScores).find((f) => f.factorId === factorId)?.label ?? factorId;
+          {allFactorKeys.map((factorKey, idx) => {
+            const label = factorKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
             return (
               <div
-                key={factorId}
+                key={factorKey}
                 className="grid px-5 py-3 items-center"
                 style={{
                   gridTemplateColumns: `160px repeat(${candidates.length}, 1fr)`,
@@ -843,18 +919,14 @@ function CompareView({ candidates, onClose }: { candidates: Candidate[]; onClose
                   {label}
                 </span>
                 {candidates.map((c) => {
-                  const fs = getFactorScore(c, factorId);
-                  const score = fs?.score ?? 0;
+                  const score = (c.factor_scores as unknown as Record<string, number>)[factorKey] ?? 0;
                   const scoreColor = score >= 75 ? "#34d399" : score >= 50 ? "#f59e0b" : "#f87171";
                   return (
                     <div key={c.id} className="px-3">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-[13px] font-mono font-medium" style={{ color: scoreColor }}>
-                          {fs?.score ?? "—"}
+                          {score}
                         </span>
-                        {fs && (
-                          <ConfidenceDot confidence={fs.confidence} />
-                        )}
                       </div>
                       <div className="h-1 rounded-full overflow-hidden" style={{ background: "var(--input-bg)" }}>
                         <div
@@ -915,13 +987,12 @@ function CompareView({ candidates, onClose }: { candidates: Candidate[]; onClose
 
 /* ─── FactorRow ──────────────────────────────────────────────────────────── */
 
-function FactorRow({ factor }: { factor: FactorScore }) {
-  const score = factor.score ?? 0;
+function FactorRow({ label, score }: { label: string; score: number }) {
   const scoreColor = score >= 75 ? "#34d399" : score >= 50 ? "#f59e0b" : "#f87171";
   return (
     <div className="flex items-center gap-3">
       <span className="w-[160px] flex-shrink-0 text-[12px] truncate" style={{ color: "var(--text-muted)" }}>
-        {factor.label}
+        {label}
       </span>
       <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--input-bg)" }}>
         <div
@@ -930,9 +1001,8 @@ function FactorRow({ factor }: { factor: FactorScore }) {
         />
       </div>
       <div className="flex items-center gap-1.5 flex-shrink-0 w-12 justify-end">
-        <ConfidenceDot confidence={factor.confidence} />
         <span className="text-[12px] font-mono" style={{ color: scoreColor }}>
-          {factor.score ?? "—"}
+          {score}
         </span>
       </div>
     </div>
@@ -940,18 +1010,6 @@ function FactorRow({ factor }: { factor: FactorScore }) {
 }
 
 /* ─── Small shared components ────────────────────────────────────────────── */
-
-function ConfidenceDot({ confidence }: { confidence: "strong" | "weak" | "not-found" }) {
-  const color =
-    confidence === "strong" ? "#34d399" : confidence === "weak" ? "#f59e0b" : "#f87171";
-  return (
-    <span
-      title={confidence}
-      className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-      style={{ background: color, opacity: 0.7 }}
-    />
-  );
-}
 
 function Tag({ text, variant }: { text: string; variant: "green" | "amber" | "muted" }) {
   const styles = {
