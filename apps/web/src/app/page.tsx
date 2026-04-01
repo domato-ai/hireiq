@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { NavLogo } from "@/components/ui/logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -54,12 +54,40 @@ export default function HomePage() {
   const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState("");
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [progressStep, setProgressStep] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [compareMode, setCompareMode] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jdFileInputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+
+  // Progress pipeline steps — timed to match real API processing
+  const progressSteps = [
+    { label: "Reading job description", detail: "Extracting role requirements, must-have skills, and seniority level", icon: "📋", pct: 8 },
+    { label: "Parsing resumes", detail: `Opening ${files.length} document${files.length !== 1 ? "s" : ""} and extracting text content`, icon: "📄", pct: 20 },
+    { label: "Identifying candidates", detail: "Extracting names, experience, skills, and education from each resume", icon: "🔍", pct: 40 },
+    { label: "Matching skills to requirements", detail: "Comparing each candidate's skills against your must-have and nice-to-have criteria", icon: "🎯", pct: 55 },
+    { label: "Evaluating experience levels", detail: "Checking years of experience, seniority fit, and relevant industry background", icon: "📊", pct: 70 },
+    { label: "Scoring and ranking", detail: "Running weighted scoring across 5 factors for each candidate", icon: "⚖️", pct: 85 },
+    { label: "Generating shortlist", detail: "Identifying strengths, risks, and evidence gaps for your top matches", icon: "✨", pct: 95 },
+  ];
+
+  useEffect(() => {
+    if (step !== "analyzing") {
+      setProgressStep(0);
+      return;
+    }
+    // Advance through steps on a schedule (~2s per step for small batches)
+    const interval = Math.max(1500, (files.length * 1200));
+    const timer = setInterval(() => {
+      setProgressStep((prev) => {
+        if (prev >= progressSteps.length - 1) return prev;
+        return prev + 1;
+      });
+    }, interval);
+    return () => clearInterval(timer);
+  }, [step, files.length, progressSteps.length]);
 
   const hasJD = jdMode === "paste" ? jdText.trim().length > 20 : jdFile !== null;
   const hasFiles = files.length > 0;
@@ -268,25 +296,82 @@ export default function HomePage() {
           }}
         >
           {step === "analyzing" ? (
-            <div className="py-10 text-center">
-              <div className="relative w-14 h-14 mx-auto mb-5">
-                <svg className="w-14 h-14 analyzing-spinner" viewBox="0 0 56 56">
-                  <circle cx="28" cy="28" r="22" fill="none" stroke="var(--input-border)" strokeWidth="2" />
-                  <circle cx="28" cy="28" r="22" fill="none" strokeWidth="2.5" strokeDasharray="35 105" strokeLinecap="round" stroke="url(#sg)" />
-                  <defs>
-                    <linearGradient id="sg" x1="0" y1="0" x2="1" y2="1">
-                      <stop offset="0%" stopColor="#7c5cff" />
-                      <stop offset="100%" stopColor="#7c5cff" stopOpacity="0.1" />
-                    </linearGradient>
-                  </defs>
-                </svg>
+            <div className="py-6 px-1">
+              {/* Progress bar */}
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[12px] font-medium" style={{ color: "var(--text-body)" }}>
+                    Analyzing {files.length} resume{files.length !== 1 ? "s" : ""}
+                  </span>
+                  <span className="text-[11px] font-mono" style={{ color: "var(--text-faint)" }}>
+                    {progressSteps[progressStep]?.pct ?? 0}%
+                  </span>
+                </div>
+                <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "var(--input-bg)" }}>
+                  <div
+                    className="h-full rounded-full transition-all duration-1000 ease-out"
+                    style={{
+                      width: `${progressSteps[progressStep]?.pct ?? 0}%`,
+                      background: "linear-gradient(90deg, #7c5cff 0%, #a78bfa 100%)",
+                      boxShadow: "0 0 8px rgba(124,92,255,0.4)",
+                    }}
+                  />
+                </div>
               </div>
-              <p className="text-sm font-medium" style={{ color: "var(--badge-active-text)" }}>
-                Processing {files.length} resume{files.length !== 1 ? "s" : ""}
-              </p>
-              <p className="text-xs mt-1.5" style={{ color: "var(--badge-inactive-text)" }}>
-                Extracting · Matching criteria · Scoring
-              </p>
+
+              {/* Step list */}
+              <div className="space-y-1">
+                {progressSteps.map((s, i) => {
+                  const isDone = i < progressStep;
+                  const isActive = i === progressStep;
+                  const isPending = i > progressStep;
+
+                  return (
+                    <div
+                      key={i}
+                      className="flex items-start gap-3 py-2 px-3 rounded-lg transition-all duration-300"
+                      style={{
+                        background: isActive ? "var(--input-bg)" : "transparent",
+                        opacity: isPending ? 0.35 : 1,
+                      }}
+                    >
+                      {/* Status indicator */}
+                      <div className="flex-shrink-0 mt-0.5">
+                        {isDone ? (
+                          <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "rgba(52,211,153,0.15)" }}>
+                            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                              <path d="M2 5.5L4 7.5L8 3" stroke="#34d399" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
+                          </div>
+                        ) : isActive ? (
+                          <div className="w-5 h-5 rounded-full flex items-center justify-center analyzing-spinner" style={{ background: "rgba(124,92,255,0.1)" }}>
+                            <div className="w-2 h-2 rounded-full" style={{ background: "#7c5cff" }} />
+                          </div>
+                        ) : (
+                          <div className="w-5 h-5 rounded-full" style={{ background: "var(--input-bg)", border: "1px solid var(--card-border)" }} />
+                        )}
+                      </div>
+
+                      {/* Step content */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[12px] font-medium" style={{ color: isDone ? "var(--ready-color)" : isActive ? "var(--text-body)" : "var(--text-faint)" }}>
+                          {s.label}
+                        </p>
+                        {isActive && (
+                          <p className="text-[11px] mt-0.5 progress-detail-enter" style={{ color: "var(--text-muted)" }}>
+                            {s.detail}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Emoji icon */}
+                      <span className="text-[13px] flex-shrink-0 mt-0.5" style={{ opacity: isPending ? 0.3 : 0.7 }}>
+                        {s.icon}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : step === "results" ? (
             /* ── Results summary card ── */

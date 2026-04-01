@@ -169,6 +169,16 @@
   animation: metric-pulse 2s ease-in-out infinite;
 }
 
+/* Progress detail text fade-in */
+@keyframes progress-detail-enter {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.progress-detail-enter {
+  animation: progress-detail-enter 0.3s ease-out both;
+}
+
 /* ─── Home page styles ─────────────────────────────────────────────────────── */
 
 /* Gradient background — warm ivory to soft slate with color shifts */
