@@ -17,6 +17,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analyze", tags=["analyze"])
 
 
+class FactorDetail(BaseModel):
+    score: float
+    label: str
+    weight: float
+    verdict: str  # strong/partial/weak/missing
+    jd_required: str
+    candidate_has: str
+    reasoning: str
+    matched: list[str] = []
+    missing: list[str] = []
+
+
 class CandidateResult(BaseModel):
     id: str
     name: str | None
@@ -25,7 +37,9 @@ class CandidateResult(BaseModel):
     location: str | None
     years_experience: int | None
     overall_score: float
-    factor_scores: dict
+    recommendation: str
+    summary: str
+    factor_scores: dict[str, FactorDetail]
     strengths: list[str]
     risks: list[str]
     missing_evidence: list[str]
@@ -105,6 +119,12 @@ async def analyze(
             logger.info("[%s] Scoring %s...", analysis_id, filename)
             scoring_result = await score_candidate(structured, jd_requirements)
 
+            # Convert factor_scores dicts to FactorDetail models
+            factor_details = {
+                name: FactorDetail(**detail)
+                for name, detail in scoring_result.factor_scores.items()
+            }
+
             candidates.append(CandidateResult(
                 id=str(uuid.uuid4())[:8],
                 name=structured.get("name"),
@@ -113,7 +133,9 @@ async def analyze(
                 location=structured.get("location"),
                 years_experience=structured.get("years_experience"),
                 overall_score=scoring_result.overall_score,
-                factor_scores=scoring_result.factor_scores,
+                recommendation=scoring_result.recommendation,
+                summary=scoring_result.summary,
+                factor_scores=factor_details,
                 strengths=scoring_result.strengths,
                 risks=scoring_result.risks,
                 missing_evidence=scoring_result.missing_evidence,

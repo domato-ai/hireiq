@@ -52,9 +52,15 @@ Return a JSON object with these exact fields:
   "education": [{"degree": "...", "field": "...", "institution": "...", "year": number or null}],
   "experience": [{"title": "...", "company": "...", "duration": "...", "highlights": ["..."]}],
   "certifications": ["cert1", ...],
-  "summary": "1-2 sentence professional summary"
+  "summary": "1-2 sentence professional summary",
+  "achievements": ["Quantified achievement or metric, e.g. 'Increased ARR by 18%'", ...],
+  "leadership_evidence": ["Leadership or management mention, e.g. 'Led a team of 8 engineers'", ...],
+  "industries": ["Industry or domain, e.g. 'B2B SaaS', 'Fintech', 'Healthcare'", ...]
 }
-Only include information explicitly stated in the resume. Use null for missing fields. Do not infer or fabricate."""
+For "achievements": extract all quantified results, metrics, percentages, dollar amounts, user counts, and measurable outcomes mentioned in the resume. Include the full context phrase.
+For "leadership_evidence": extract all mentions of team leadership, management, mentoring, cross-functional collaboration, direct reports, and team sizes. Include the full context phrase.
+For "industries": extract all industries, domains, and verticals the candidate has worked in based on their companies and role descriptions.
+Only include information explicitly stated in the resume. Use null for missing fields. Use empty arrays [] if no items found. Do not infer or fabricate."""
 
 async def extract_resume_structured(raw_text: str) -> dict:
     """Extract structured data from resume text using regex + LLM."""

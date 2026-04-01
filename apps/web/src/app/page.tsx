@@ -13,12 +13,16 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://ca-hireiq-api-dev.de
 
 type Step = "idle" | "analyzing" | "results";
 
-interface FactorScores {
-  skills_match: number;
-  experience_years: number;
-  education_match: number;
-  title_proximity: number;
-  location_match: number;
+interface FactorDetail {
+  score: number;
+  label: string;
+  weight: number;
+  verdict: "strong" | "partial" | "weak" | "missing";
+  jd_required: string;
+  candidate_has: string;
+  reasoning: string;
+  matched: string[];
+  missing: string[];
 }
 
 interface CandidateResult {
@@ -29,7 +33,9 @@ interface CandidateResult {
   location: string | null;
   years_experience: number | null;
   overall_score: number;
-  factor_scores: FactorScores;
+  recommendation: string; // "strong_yes" | "yes" | "maybe" | "no"
+  summary: string;
+  factor_scores: Record<string, FactorDetail>;
   strengths: string[];
   risks: string[];
   missing_evidence: string[];
@@ -41,6 +47,40 @@ interface AnalysisResult {
   candidates: CandidateResult[];
   total_processed: number;
   total_skipped: number;
+}
+
+/* ─── Verdict helpers ────────────────────────────────────────────────────── */
+
+const VERDICT_COLOR: Record<string, string> = {
+  strong: "#34d399",
+  partial: "#fbbf24",
+  weak: "#f87171",
+  missing: "var(--text-faint)",
+};
+
+const VERDICT_BG: Record<string, string> = {
+  strong: "rgba(52,211,153,0.10)",
+  partial: "rgba(251,191,36,0.10)",
+  weak: "rgba(248,113,113,0.10)",
+  missing: "var(--input-bg)",
+};
+
+const VERDICT_LABEL: Record<string, string> = {
+  strong: "Strong",
+  partial: "Partial",
+  weak: "Weak",
+  missing: "Missing",
+};
+
+const RECOMMENDATION_META: Record<string, { label: string; color: string; bg: string; border: string }> = {
+  strong_yes: { label: "Strong Yes", color: "#34d399", bg: "rgba(52,211,153,0.10)", border: "rgba(52,211,153,0.25)" },
+  yes: { label: "Yes", color: "#60a5fa", bg: "rgba(96,165,250,0.10)", border: "rgba(96,165,250,0.25)" },
+  maybe: { label: "Maybe", color: "#fbbf24", bg: "rgba(251,191,36,0.10)", border: "rgba(251,191,36,0.25)" },
+  no: { label: "No", color: "#f87171", bg: "rgba(248,113,113,0.10)", border: "rgba(248,113,113,0.25)" },
+};
+
+function scoreColor(score: number) {
+  return score >= 75 ? "#34d399" : score >= 50 ? "#fbbf24" : "#f87171";
 }
 
 /* ─── Main page ─────────────────────────────────────────────────────────── */
@@ -69,7 +109,7 @@ export default function HomePage() {
     { label: "Identifying candidates", detail: "Extracting names, experience, skills, and education from each resume", icon: "🔍", pct: 40 },
     { label: "Matching skills to requirements", detail: "Comparing each candidate's skills against your must-have and nice-to-have criteria", icon: "🎯", pct: 55 },
     { label: "Evaluating experience levels", detail: "Checking years of experience, seniority fit, and relevant industry background", icon: "📊", pct: 70 },
-    { label: "Scoring and ranking", detail: "Running weighted scoring across 5 factors for each candidate", icon: "⚖️", pct: 85 },
+    { label: "Scoring and ranking", detail: "Running weighted scoring across all factors for each candidate", icon: "⚖️", pct: 85 },
     { label: "Generating shortlist", detail: "Identifying strengths, risks, and evidence gaps for your top matches", icon: "✨", pct: 95 },
   ];
 
@@ -78,7 +118,6 @@ export default function HomePage() {
       setProgressStep(0);
       return;
     }
-    // Advance through steps on a schedule (~2s per step for small batches)
     const interval = Math.max(1500, (files.length * 1200));
     const timer = setInterval(() => {
       setProgressStep((prev) => {
@@ -711,7 +750,9 @@ function CandidateCard({
   onToggleSelect: (e: React.MouseEvent) => void;
   animDelay: number;
 }) {
-  const scoreColor = candidate.overall_score >= 75 ? "#34d399" : candidate.overall_score >= 50 ? "#f59e0b" : "#f87171";
+  const sc = scoreColor(candidate.overall_score);
+  const recMeta = RECOMMENDATION_META[candidate.recommendation] ?? RECOMMENDATION_META["maybe"];
+  const factorEntries = Object.entries(candidate.factor_scores);
 
   return (
     <div
@@ -723,16 +764,16 @@ function CandidateCard({
         transition: "border-color 0.15s, background 0.15s",
       }}
     >
-      {/* Card header — always visible, clickable */}
+      {/* ── Card header — always visible, clickable ── */}
       <div
-        className="flex items-center gap-3 px-4 py-3.5 cursor-pointer select-none"
+        className="flex items-start gap-3 px-4 pt-3.5 pb-2 cursor-pointer select-none"
         onClick={onToggleExpand}
         style={{ userSelect: "none" }}
       >
         {/* Checkbox */}
         <div
           onClick={onToggleSelect}
-          className="flex-shrink-0 w-4 h-4 rounded flex items-center justify-center transition-all duration-150 cursor-pointer"
+          className="flex-shrink-0 mt-1 w-4 h-4 rounded flex items-center justify-center transition-all duration-150 cursor-pointer"
           style={{
             background: isSelected ? "#7c5cff" : "var(--input-bg)",
             border: isSelected ? "1px solid #7c5cff" : "1px solid var(--input-border)",
@@ -747,43 +788,48 @@ function CandidateCard({
 
         {/* Rank */}
         <span
-          className="flex-shrink-0 w-5 text-[11px] font-mono text-center"
+          className="flex-shrink-0 mt-1 w-5 text-[11px] font-mono text-center"
           style={{ color: rank === 1 ? "#a78bfa" : "var(--text-faint)" }}
         >
           {rank}
         </span>
 
-        {/* Name + title */}
+        {/* Name + title + recommendation badge */}
         <div className="flex-1 min-w-0">
-          <p className="text-[14px] font-semibold leading-tight truncate" style={{ color: "var(--text-heading)" }}>
-            {candidate.name ?? "Unknown Candidate"}
-          </p>
-          <p className="text-[12px] truncate mt-0.5" style={{ color: "var(--text-muted)" }}>
-            {candidate.current_title ?? "—"} @ {candidate.current_company ?? "—"}
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-[14px] font-semibold leading-tight" style={{ color: "var(--text-heading)" }}>
+              {candidate.name ?? "Unknown Candidate"}
+            </p>
+            {/* Recommendation badge */}
+            <span
+              className="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide flex-shrink-0"
+              style={{
+                color: recMeta.color,
+                background: recMeta.bg,
+                border: `1px solid ${recMeta.border}`,
+              }}
+            >
+              {recMeta.label}
+            </span>
+          </div>
+          <p className="text-[12px] mt-0.5 truncate" style={{ color: "var(--text-muted)" }}>
+            {candidate.current_title ?? "—"}
+            {candidate.current_company ? ` @ ${candidate.current_company}` : ""}
           </p>
         </div>
 
-        {/* Score bar + value */}
-        <div className="flex-shrink-0 flex flex-col items-end gap-1.5 w-28">
-          <div className="flex items-center gap-2">
-            <span
-              className="font-display text-[18px] font-normal leading-none"
-              style={{ color: scoreColor }}
-            >
+        {/* Score + bar */}
+        <div className="flex-shrink-0 flex flex-col items-end gap-1.5 w-24">
+          <div className="flex items-center gap-1">
+            <span className="font-display text-[18px] font-normal leading-none" style={{ color: sc }}>
               {candidate.overall_score}
             </span>
-            <span className="text-[10px]" style={{ color: "var(--text-faint)" }}>
-              /100
-            </span>
+            <span className="text-[10px]" style={{ color: "var(--text-faint)" }}>/100</span>
           </div>
           <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "var(--input-bg)" }}>
             <div
               className="h-full rounded-full score-bar-fill"
-              style={{
-                width: `${candidate.overall_score}%`,
-                background: scoreColor,
-                opacity: 0.8,
-              }}
+              style={{ width: `${candidate.overall_score}%`, background: sc, opacity: 0.8 }}
             />
           </div>
         </div>
@@ -794,7 +840,7 @@ function CandidateCard({
           height="12"
           viewBox="0 0 12 12"
           fill="none"
-          className="flex-shrink-0 transition-transform duration-200"
+          className="flex-shrink-0 transition-transform duration-200 mt-1"
           style={{
             color: "var(--text-faint)",
             transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
@@ -804,73 +850,100 @@ function CandidateCard({
         </svg>
       </div>
 
-      {/* Strength + risk tags — always visible */}
-      <div className="flex flex-wrap gap-1.5 px-4 pb-3 pt-0">
-        {candidate.strengths.slice(0, 2).map((s, i) => (
-          <Tag key={i} text={s.split(" — ")[0].split(":")[0].substring(0, 40)} variant="green" />
-        ))}
-        {candidate.risks[0] && (
-          <Tag text={candidate.risks[0].split(" — ")[0].substring(0, 40)} variant="muted" />
-        )}
-      </div>
+      {/* ── Summary text — key recruiter value ── */}
+      {candidate.summary && (
+        <div className="px-4 pb-2.5 pl-12">
+          <p
+            className="text-[13px] leading-relaxed"
+            style={{ color: "var(--text-body)" }}
+          >
+            {candidate.summary}
+          </p>
+        </div>
+      )}
 
-      {/* Expanded panel */}
+      {/* ── Factor verdict pills ── */}
+      {factorEntries.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 px-4 pb-3 pl-12">
+          {factorEntries.map(([key, detail]) => {
+            const vColor = VERDICT_COLOR[detail.verdict] ?? "var(--text-faint)";
+            return (
+              <span
+                key={key}
+                className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full"
+                style={{
+                  color: vColor,
+                  background: VERDICT_BG[detail.verdict] ?? "var(--input-bg)",
+                  border: `1px solid ${vColor}22`,
+                }}
+              >
+                <span
+                  className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                  style={{ background: vColor }}
+                />
+                {detail.label ?? key.replace(/_/g, " ")}
+              </span>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── Expanded panel ── */}
       {isExpanded && (
-        <div
-          style={{
-            borderTop: "1px solid var(--divider)",
-          }}
-        >
+        <div style={{ borderTop: "1px solid var(--divider)" }}>
           <div className="px-4 py-4 space-y-5">
-            {/* Factor scores */}
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-muted)" }}>
-                Factor Scores
-              </p>
-              <div className="space-y-2.5">
-                {Object.entries(candidate.factor_scores).map(([key, score]) => (
-                  <FactorRow
-                    key={key}
-                    label={key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
-                    score={score}
-                  />
-                ))}
+
+            {/* Factor evidence rows */}
+            {factorEntries.length > 0 && (
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider mb-3" style={{ color: "var(--text-muted)" }}>
+                  Evidence Breakdown
+                </p>
+                <div className="space-y-2">
+                  {factorEntries.map(([key, detail]) => (
+                    <FactorEvidenceRow key={key} factorKey={key} detail={detail} />
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Strengths */}
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>
-                Strengths
-              </p>
-              <ul className="space-y-1.5">
-                {candidate.strengths.map((s, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "#34d399" }} />
-                    <span className="text-[13px] leading-snug" style={{ color: "var(--text-body)" }}>
-                      {s}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {candidate.strengths.length > 0 && (
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>
+                  Strengths
+                </p>
+                <ul className="space-y-1.5">
+                  {candidate.strengths.map((s, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <span className="flex-shrink-0 text-[13px] font-bold mt-0.5" style={{ color: "#34d399" }}>+</span>
+                      <span className="text-[13px] leading-snug" style={{ color: "var(--text-body)" }}>
+                        {s}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Risks */}
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>
-                Risks
-              </p>
-              <ul className="space-y-1.5">
-                {candidate.risks.map((r, i) => (
-                  <li key={i} className="flex items-start gap-2">
-                    <span className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "#f87171" }} />
-                    <span className="text-[13px] leading-snug" style={{ color: "var(--text-body)" }}>
-                      {r}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {candidate.risks.length > 0 && (
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>
+                  Risks
+                </p>
+                <ul className="space-y-1.5">
+                  {candidate.risks.map((r, i) => (
+                    <li key={i} className="flex items-start gap-2">
+                      <span className="flex-shrink-0 text-[13px] font-bold mt-0.5" style={{ color: "#f87171" }}>!</span>
+                      <span className="text-[13px] leading-snug" style={{ color: "var(--text-body)" }}>
+                        {r}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {/* Missing evidence */}
             {candidate.missing_evidence.length > 0 && (
@@ -878,11 +951,16 @@ function CandidateCard({
                 <p className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--text-muted)" }}>
                   Missing Evidence
                 </p>
-                <div className="flex flex-wrap gap-1.5">
+                <ul className="space-y-1.5">
                   {candidate.missing_evidence.map((m, i) => (
-                    <Tag key={i} text={m} variant="amber" />
+                    <li key={i} className="flex items-start gap-2">
+                      <span className="flex-shrink-0 text-[13px] font-bold mt-0.5" style={{ color: "var(--text-faint)" }}>?</span>
+                      <span className="text-[13px] leading-snug" style={{ color: "var(--text-muted)" }}>
+                        {m}
+                      </span>
+                    </li>
                   ))}
-                </div>
+                </ul>
               </div>
             )}
 
@@ -915,10 +993,164 @@ function CandidateCard({
   );
 }
 
+/* ─── FactorEvidenceRow ──────────────────────────────────────────────────── */
+
+function FactorEvidenceRow({ factorKey, detail }: { factorKey: string; detail: FactorDetail }) {
+  const [open, setOpen] = useState(false);
+  const vColor = VERDICT_COLOR[detail.verdict] ?? "var(--text-faint)";
+  const sc = scoreColor(detail.score);
+  const label = detail.label ?? factorKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  return (
+    <div
+      className="rounded-lg overflow-hidden transition-all duration-150"
+      style={{
+        border: "1px solid var(--card-border)",
+        borderLeft: `3px solid ${vColor}`,
+        background: open ? VERDICT_BG[detail.verdict] ?? "var(--input-bg)" : "var(--card-bg)",
+      }}
+    >
+      {/* Row header — clickable to expand */}
+      <div
+        className="flex items-center gap-3 px-3 py-2.5 cursor-pointer select-none"
+        onClick={() => setOpen((v) => !v)}
+        style={{ userSelect: "none" }}
+      >
+        {/* Score bar */}
+        <div className="flex-shrink-0 w-16">
+          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--input-bg)" }}>
+            <div
+              className="h-full rounded-full"
+              style={{ width: `${detail.score}%`, background: sc, opacity: 0.85 }}
+            />
+          </div>
+        </div>
+
+        {/* Label + score */}
+        <div className="flex-1 min-w-0 flex items-center gap-2">
+          <span className="text-[12px] font-medium truncate" style={{ color: "var(--text-body)" }}>
+            {label}
+          </span>
+          <span className="text-[11px] font-mono flex-shrink-0" style={{ color: sc }}>
+            {detail.score}/100
+          </span>
+        </div>
+
+        {/* Verdict badge */}
+        <span
+          className="flex-shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide"
+          style={{ color: vColor, background: VERDICT_BG[detail.verdict] ?? "var(--input-bg)" }}
+        >
+          {VERDICT_LABEL[detail.verdict] ?? detail.verdict}
+        </span>
+
+        {/* Chevron */}
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 12 12"
+          fill="none"
+          className="flex-shrink-0 transition-transform duration-200"
+          style={{ color: "var(--text-faint)", transform: open ? "rotate(90deg)" : "rotate(0deg)" }}
+        >
+          <path d="M4.5 2.5L7.5 6l-3 3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </div>
+
+      {/* Expanded evidence */}
+      {open && (
+        <div
+          className="px-3 pb-3 space-y-2"
+          style={{ borderTop: "1px solid var(--divider)" }}
+        >
+          {/* JD requires */}
+          {detail.jd_required && (
+            <div className="pt-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
+                JD requires:{" "}
+              </span>
+              <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
+                {detail.jd_required}
+              </span>
+            </div>
+          )}
+
+          {/* Candidate has */}
+          {detail.candidate_has && (
+            <div>
+              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
+                Candidate has:{" "}
+              </span>
+              <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
+                {detail.candidate_has}
+              </span>
+            </div>
+          )}
+
+          {/* Matched pills — only if they exist */}
+          {detail.matched && detail.matched.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider self-center" style={{ color: "var(--text-faint)" }}>
+                Matched:
+              </span>
+              {detail.matched.map((m, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full"
+                  style={{
+                    color: "#34d399",
+                    background: "rgba(52,211,153,0.08)",
+                    border: "1px solid rgba(52,211,153,0.2)",
+                  }}
+                >
+                  ✓ {m}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Missing pills */}
+          {detail.missing && detail.missing.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wider self-center" style={{ color: "var(--text-faint)" }}>
+                Missing:
+              </span>
+              {detail.missing.map((m, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full"
+                  style={{
+                    color: "#f87171",
+                    background: "rgba(248,113,113,0.08)",
+                    border: "1px solid rgba(248,113,113,0.2)",
+                  }}
+                >
+                  ✗ {m}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {/* Reasoning */}
+          {detail.reasoning && (
+            <div
+              className="rounded-lg px-3 py-2 mt-1"
+              style={{ background: "var(--input-bg)", border: "1px solid var(--card-border)" }}
+            >
+              <p className="text-[12px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+                → {detail.reasoning}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── CompareView ────────────────────────────────────────────────────────── */
 
 function CompareView({ candidates, onClose }: { candidates: CandidateResult[]; onClose: () => void }) {
-  // Collect all unique factor keys from selected candidates
   const allFactorKeys = Array.from(
     new Set(candidates.flatMap((c) => Object.keys(c.factor_scores)))
   );
@@ -955,6 +1187,7 @@ function CompareView({ candidates, onClose }: { candidates: CandidateResult[]; o
       {/* Candidate columns */}
       <div className="overflow-x-auto">
         <div style={{ minWidth: `${candidates.length * 200}px` }}>
+
           {/* Name header row */}
           <div
             className="grid px-5 py-4"
@@ -965,7 +1198,8 @@ function CompareView({ candidates, onClose }: { candidates: CandidateResult[]; o
           >
             <div />
             {candidates.map((c) => {
-              const scoreColor = c.overall_score >= 75 ? "#34d399" : c.overall_score >= 50 ? "#f59e0b" : "#f87171";
+              const sc = scoreColor(c.overall_score);
+              const recMeta = RECOMMENDATION_META[c.recommendation] ?? RECOMMENDATION_META["maybe"];
               return (
                 <div key={c.id} className="px-3">
                   <p className="text-[13px] font-semibold truncate" style={{ color: "var(--text-heading)" }}>
@@ -974,12 +1208,16 @@ function CompareView({ candidates, onClose }: { candidates: CandidateResult[]; o
                   <p className="text-[11px] truncate mt-0.5" style={{ color: "var(--text-muted)" }}>
                     {c.current_title ?? "—"}
                   </p>
-                  <div className="flex items-center gap-1.5 mt-2">
-                    <span className="font-display text-[22px] leading-none" style={{ color: scoreColor }}>
+                  <div className="flex items-center gap-2 mt-2 flex-wrap">
+                    <span className="font-display text-[22px] leading-none" style={{ color: sc }}>
                       {c.overall_score}
                     </span>
-                    <span className="text-[10px]" style={{ color: "var(--text-faint)" }}>
-                      /100
+                    <span className="text-[10px]" style={{ color: "var(--text-faint)" }}>/100</span>
+                    <span
+                      className="inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded-full uppercase tracking-wide"
+                      style={{ color: recMeta.color, background: recMeta.bg, border: `1px solid ${recMeta.border}` }}
+                    >
+                      {recMeta.label}
                     </span>
                   </div>
                 </div>
@@ -989,7 +1227,6 @@ function CompareView({ candidates, onClose }: { candidates: CandidateResult[]; o
 
           {/* Factor rows */}
           {allFactorKeys.map((factorKey, idx) => {
-            const label = factorKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
             return (
               <div
                 key={factorKey}
@@ -1001,22 +1238,34 @@ function CompareView({ candidates, onClose }: { candidates: CandidateResult[]; o
                 }}
               >
                 <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>
-                  {label}
+                  {allFactorKeys[idx] &&
+                    (candidates.find((c) => c.factor_scores[factorKey])?.factor_scores[factorKey]?.label
+                      ?? factorKey.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()))}
                 </span>
                 {candidates.map((c) => {
-                  const score = (c.factor_scores as unknown as Record<string, number>)[factorKey] ?? 0;
-                  const scoreColor = score >= 75 ? "#34d399" : score >= 50 ? "#f59e0b" : "#f87171";
+                  const detail = c.factor_scores[factorKey];
+                  const sc = detail ? scoreColor(detail.score) : "var(--text-faint)";
+                  const vColor = detail ? (VERDICT_COLOR[detail.verdict] ?? "var(--text-faint)") : "var(--text-faint)";
+                  const score = detail?.score ?? 0;
                   return (
                     <div key={c.id} className="px-3">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-[13px] font-mono font-medium" style={{ color: scoreColor }}>
+                        <span className="text-[13px] font-mono font-medium" style={{ color: sc }}>
                           {score}
                         </span>
+                        {detail && (
+                          <span
+                            className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full"
+                            style={{ color: vColor, background: VERDICT_BG[detail.verdict] ?? "var(--input-bg)" }}
+                          >
+                            {VERDICT_LABEL[detail.verdict] ?? detail.verdict}
+                          </span>
+                        )}
                       </div>
                       <div className="h-1 rounded-full overflow-hidden" style={{ background: "var(--input-bg)" }}>
                         <div
                           className="h-full rounded-full"
-                          style={{ width: `${score}%`, background: scoreColor, opacity: 0.7 }}
+                          style={{ width: `${score}%`, background: sc, opacity: 0.7 }}
                         />
                       </div>
                     </div>
@@ -1025,6 +1274,26 @@ function CompareView({ candidates, onClose }: { candidates: CandidateResult[]; o
               </div>
             );
           })}
+
+          {/* Summary row */}
+          <div
+            className="grid px-5 py-4"
+            style={{
+              gridTemplateColumns: `160px repeat(${candidates.length}, 1fr)`,
+              borderBottom: "1px solid var(--divider)",
+            }}
+          >
+            <span className="text-[12px] font-semibold uppercase tracking-wider pt-1" style={{ color: "var(--text-muted)" }}>
+              Summary
+            </span>
+            {candidates.map((c) => (
+              <div key={c.id} className="px-3">
+                <p className="text-[12px] leading-snug" style={{ color: "var(--text-body)" }}>
+                  {c.summary || "—"}
+                </p>
+              </div>
+            ))}
+          </div>
 
           {/* Strengths row */}
           <div
@@ -1040,7 +1309,7 @@ function CompareView({ candidates, onClose }: { candidates: CandidateResult[]; o
             {candidates.map((c) => (
               <div key={c.id} className="px-3">
                 <p className="text-[12px] leading-snug" style={{ color: "var(--text-body)" }}>
-                  {c.strengths[0]}
+                  {c.strengths[0] ?? "—"}
                 </p>
               </div>
             ))}
@@ -1059,58 +1328,19 @@ function CompareView({ candidates, onClose }: { candidates: CandidateResult[]; o
             {candidates.map((c) => (
               <div key={c.id} className="px-3">
                 <p className="text-[12px] leading-snug" style={{ color: "#f87171", opacity: 0.8 }}>
-                  {c.risks[0]}
+                  {c.risks[0] ?? "—"}
                 </p>
               </div>
             ))}
           </div>
+
         </div>
       </div>
     </div>
   );
 }
 
-/* ─── FactorRow ──────────────────────────────────────────────────────────── */
-
-function FactorRow({ label, score }: { label: string; score: number }) {
-  const scoreColor = score >= 75 ? "#34d399" : score >= 50 ? "#f59e0b" : "#f87171";
-  return (
-    <div className="flex items-center gap-3">
-      <span className="w-[160px] flex-shrink-0 text-[12px] truncate" style={{ color: "var(--text-muted)" }}>
-        {label}
-      </span>
-      <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--input-bg)" }}>
-        <div
-          className="h-full rounded-full score-bar-fill"
-          style={{ width: `${score}%`, background: scoreColor, opacity: 0.8 }}
-        />
-      </div>
-      <div className="flex items-center gap-1.5 flex-shrink-0 w-12 justify-end">
-        <span className="text-[12px] font-mono" style={{ color: scoreColor }}>
-          {score}
-        </span>
-      </div>
-    </div>
-  );
-}
-
 /* ─── Small shared components ────────────────────────────────────────────── */
-
-function Tag({ text, variant }: { text: string; variant: "green" | "amber" | "muted" }) {
-  const styles = {
-    green: { color: "rgba(52,211,153,0.85)", background: "rgba(52,211,153,0.07)", border: "1px solid rgba(52,211,153,0.15)" },
-    amber: { color: "rgba(245,158,11,0.85)", background: "rgba(245,158,11,0.07)", border: "1px solid rgba(245,158,11,0.15)" },
-    muted: { color: "var(--text-muted)", background: "var(--input-bg)", border: "1px solid var(--card-border)" },
-  };
-  return (
-    <span
-      className="inline-flex items-center text-[11px] font-medium px-2 py-0.5 rounded-full"
-      style={styles[variant]}
-    >
-      {text}
-    </span>
-  );
-}
 
 function ProBadge() {
   return (
