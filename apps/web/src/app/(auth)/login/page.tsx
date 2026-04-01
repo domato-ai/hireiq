@@ -20,7 +20,7 @@ export default function LoginPage() {
     setLoading(true);
     // TODO: wire to API
     setTimeout(() => {
-      window.location.href = "/workspaces";
+      window.location.href = "/";
     }, 1000);
   };
 
