@@ -1,109 +1,155 @@
+"""Simple email/password authentication with JWT tokens."""
 from __future__ import annotations
-
+import hashlib
+import hmac
 import logging
-from typing import Annotated, Any
+import time
+import json
+import base64
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from app.config import Settings, get_settings
-from app.middleware.auth import CurrentUser, get_current_user
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# ── In-memory user store (replace with DB later) ──
+_users: dict[str, dict] = {}  # email -> {email, name, password_hash, plan, created_at}
 
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
 
 class UserOut(BaseModel):
-    id: str
     email: str
-    name: str | None
+    name: str
     plan: str
 
-    model_config = {"from_attributes": True}
 
-
-class TokenResponse(BaseModel):
+class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    user: UserOut
 
 
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
+def _hash_password(password: str) -> str:
+    """Simple password hashing."""
+    settings = get_settings()
+    return hashlib.pbkdf2_hmac(
+        'sha256', password.encode(), settings.secret_key.encode(), 100000
+    ).hex()
 
 
-@router.get("/login", summary="Redirect to Azure Entra ID login page")
-async def login(
-    settings: Annotated[Settings, Depends(get_settings)],
-    redirect_uri: str | None = None,
-) -> RedirectResponse:
-    """
-    Initiates the OAuth 2.0 / OIDC authorization code flow against
-    Azure Entra ID. The client is redirected to Microsoft's login page.
+def _create_token(email: str) -> str:
+    """Create a simple JWT-like token (base64-encoded JSON with HMAC signature)."""
+    settings = get_settings()
+    payload = {
+        "email": email,
+        "exp": int(time.time()) + 86400 * 7,  # 7 days
+    }
+    payload_b64 = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    signature = hmac.new(settings.secret_key.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
+    return f"{payload_b64}.{signature}"
 
-    TODO: Build the MSAL authorization URL and redirect.
-    """
-    # Placeholder: in production build the MSAL URL and redirect.
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Azure Entra ID login not yet configured.",
+
+def verify_token(token: str) -> dict | None:
+    """Verify and decode a token. Returns payload or None."""
+    try:
+        settings = get_settings()
+        parts = token.split(".")
+        if len(parts) != 2:
+            return None
+        payload_b64, signature = parts
+        expected_sig = hmac.new(settings.secret_key.encode(), payload_b64.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(signature, expected_sig):
+            return None
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        if payload.get("exp", 0) < time.time():
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+@router.post("/register", response_model=AuthResponse, status_code=201)
+async def register(body: RegisterRequest):
+    """Register a new user with email and password."""
+    email = body.email.lower().strip()
+
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    if len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    if email in _users:
+        raise HTTPException(status_code=409, detail="An account with this email already exists")
+
+    password_hash = _hash_password(body.password)
+    _users[email] = {
+        "email": email,
+        "name": body.name or email.split("@")[0],
+        "password_hash": password_hash,
+        "plan": "free",
+        "created_at": time.time(),
+    }
+
+    token = _create_token(email)
+    user = _users[email]
+
+    logger.info("User registered: %s", email)
+    return AuthResponse(
+        access_token=token,
+        user=UserOut(email=user["email"], name=user["name"], plan=user["plan"]),
     )
 
 
-@router.get("/callback", summary="OAuth callback — exchange code for tokens")
-async def callback(
-    request: Request,
-    settings: Annotated[Settings, Depends(get_settings)],
-    code: str | None = None,
-    state: str | None = None,
-    error: str | None = None,
-    error_description: str | None = None,
-) -> TokenResponse:
-    """
-    Handles the authorization code callback from Azure Entra ID.
-    Exchanges the code for an access + ID token, upserts the user in
-    the database, and issues a signed application JWT.
+@router.post("/login", response_model=AuthResponse)
+async def login(body: LoginRequest):
+    """Login with email and password."""
+    email = body.email.lower().strip()
 
-    TODO: Implement MSAL token exchange and user upsert.
-    """
-    if error:
-        logger.warning("Auth callback error: %s — %s", error, error_description)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error_description or error,
-        )
+    user = _users.get(email)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="OAuth callback not yet implemented.",
+    if user["password_hash"] != _hash_password(body.password):
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    token = _create_token(email)
+
+    logger.info("User logged in: %s", email)
+    return AuthResponse(
+        access_token=token,
+        user=UserOut(email=user["email"], name=user["name"], plan=user["plan"]),
     )
 
 
-@router.post("/logout", summary="Invalidate the current session / token")
-async def logout(
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> dict[str, str]:
-    """
-    Logs out the authenticated user.
+@router.get("/me", response_model=UserOut)
+async def me(token: str = ""):
+    """Get the current user from the Authorization header."""
+    # This will be called by frontend with the stored token
+    # For now, accept token as query param or header
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
 
-    For stateless JWT flows this is a client-side operation; for
-    server-side session strategies, invalidate the session here.
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    TODO: Add token blocklist / session invalidation if needed.
-    """
-    return {"detail": "Logged out successfully."}
+    user = _users.get(payload["email"])
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
 
-
-@router.get("/me", response_model=UserOut, summary="Return the authenticated user's profile")
-async def me(
-    current_user: Annotated[CurrentUser, Depends(get_current_user)],
-) -> Any:
-    """Returns the profile of the currently authenticated user."""
-    return current_user
+    return UserOut(email=user["email"], name=user["name"], plan=user["plan"])

@@ -101,6 +101,20 @@ export default function HomePage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jdFileInputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
+  const [user, setUser] = useState<{ email: string; name: string; plan: string } | null>(null);
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("hireiq-user");
+      if (stored) setUser(JSON.parse(stored));
+    } catch {}
+  }, []);
+
+  const handleSignOut = () => {
+    localStorage.removeItem("hireiq-token");
+    localStorage.removeItem("hireiq-user");
+    setUser(null);
+  };
 
   // Progress pipeline steps — timed to match real API processing
   const progressSteps = [
@@ -254,21 +268,43 @@ export default function HomePage() {
       <nav className="relative z-20 flex items-center justify-between px-6 md:px-10 py-5 max-w-5xl mx-auto">
         <NavLogo variant="dark" />
         <div className="flex items-center gap-4">
-          <Link href="/signup" className="text-[13px] transition-colors" style={{ color: "var(--text-muted)" }}>
-            Create workspace
-          </Link>
-          <ThemeToggle />
-          <Link
-            href="/login"
-            className="text-[13px] font-medium px-4 py-2 rounded-lg transition-all duration-200"
-            style={{
-              color: "var(--text-heading)",
-              background: "var(--nav-btn-bg)",
-              border: "1px solid var(--nav-btn-border)",
-            }}
-          >
-            Sign in
-          </Link>
+          {user ? (
+            <>
+              <span className="text-[13px] transition-colors" style={{ color: "var(--text-muted)" }}>
+                {user.email}
+              </span>
+              <ThemeToggle />
+              <button
+                onClick={handleSignOut}
+                className="text-[13px] font-medium px-4 py-2 rounded-lg transition-all duration-200"
+                style={{
+                  color: "var(--text-heading)",
+                  background: "var(--nav-btn-bg)",
+                  border: "1px solid var(--nav-btn-border)",
+                }}
+              >
+                Sign out
+              </button>
+            </>
+          ) : (
+            <>
+              <Link href="/signup" className="text-[13px] transition-colors" style={{ color: "var(--text-muted)" }}>
+                Create workspace
+              </Link>
+              <ThemeToggle />
+              <Link
+                href="/login"
+                className="text-[13px] font-medium px-4 py-2 rounded-lg transition-all duration-200"
+                style={{
+                  color: "var(--text-heading)",
+                  background: "var(--nav-btn-bg)",
+                  border: "1px solid var(--nav-btn-border)",
+                }}
+              >
+                Sign in
+              </Link>
+            </>
+          )}
         </div>
       </nav>
 

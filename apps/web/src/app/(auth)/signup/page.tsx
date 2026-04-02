@@ -5,6 +5,8 @@ import Link from "next/link";
 import { NavLogo } from "@/components/ui/logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://ca-hireiq-api-dev.delightfulsea-504dfc83.australiaeast.azurecontainerapps.io";
+
 export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -22,10 +24,23 @@ export default function SignupPage() {
     if (!isValid) return;
     setError("");
     setLoading(true);
-    // TODO: wire to API
-    setTimeout(() => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, name: "" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || "Registration failed");
+      }
+      localStorage.setItem("hireiq-token", data.access_token);
+      localStorage.setItem("hireiq-user", JSON.stringify(data.user));
       window.location.href = "/";
-    }, 1200);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+      setLoading(false);
+    }
   };
 
   return (
