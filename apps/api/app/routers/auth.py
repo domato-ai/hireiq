@@ -8,7 +8,7 @@ import json
 import base64
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Header, HTTPException, status
 from pydantic import BaseModel
 
 from app.config import get_settings
@@ -137,13 +137,12 @@ async def login(body: LoginRequest):
 
 
 @router.get("/me", response_model=UserOut)
-async def me(token: str = ""):
-    """Get the current user from the Authorization header."""
-    # This will be called by frontend with the stored token
-    # For now, accept token as query param or header
-    if not token:
+async def me(authorization: str | None = Header(default=None)):
+    """Get current user from Authorization header."""
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    token = authorization[7:]
     payload = verify_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")

@@ -102,6 +102,8 @@ export default function HomePage() {
   const jdFileInputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const [user, setUser] = useState<{ email: string; name: string; plan: string } | null>(null);
+  const [usage, setUsage] = useState<{ used: number; limit: number; remaining: number; plan: string } | null>(null);
+  const [limitModal, setLimitModal] = useState<{ plan: string; used: number; limit: number; hint: string } | null>(null);
 
   useEffect(() => {
     try {
@@ -109,6 +111,21 @@ export default function HomePage() {
       if (stored) setUser(JSON.parse(stored));
     } catch {}
   }, []);
+
+  const fetchUsage = async () => {
+    try {
+      const headers: Record<string, string> = {};
+      const token = typeof window !== "undefined" ? localStorage.getItem("hireiq-token") : null;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const res = await fetch(`${API_URL}/api/v1/analyze/usage`, { headers });
+      if (res.ok) setUsage(await res.json());
+    } catch {}
+  };
+
+  useEffect(() => {
+    fetchUsage();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const handleSignOut = () => {
     localStorage.removeItem("hireiq-token");
@@ -195,10 +212,27 @@ export default function HomePage() {
         formData.append("files", file);
       }
 
+      const headers: Record<string, string> = {};
+      const token = typeof window !== "undefined" ? localStorage.getItem("hireiq-token") : null;
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
       const response = await fetch(`${API_URL}/api/v1/analyze`, {
         method: "POST",
+        headers,
         body: formData,
       });
+
+      if (response.status === 429) {
+        const data = await response.json();
+        setLimitModal({
+          plan: data.detail.plan,
+          used: data.detail.used,
+          limit: data.detail.limit,
+          hint: data.detail.upgrade_hint,
+        });
+        setStep("idle");
+        return;
+      }
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({ detail: "Analysis failed" }));
@@ -206,8 +240,12 @@ export default function HomePage() {
       }
 
       const data = await response.json();
+      if (data.usage) {
+        setUsage(data.usage);
+      }
       setAnalysisResult(data);
       setStep("results");
+      fetchUsage();
       setTimeout(() => {
         resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       }, 100);
@@ -650,33 +688,73 @@ export default function HomePage() {
               </div>
 
               {/* ── CTA Button ── */}
-              <button
-                onClick={handleStart}
-                disabled={!canStart}
-                className="w-full py-3 rounded-xl text-sm font-semibold transition-all duration-300 active:scale-[0.98]"
-                style={
-                  canStart
-                    ? {
-                        background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
-                        color: "#fff",
-                        boxShadow: "0 0 24px rgba(124,92,255,0.3), 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.15)",
-                      }
-                    : {
-                        background: "var(--btn-disabled-bg)",
-                        color: "var(--btn-disabled-text)",
-                        cursor: "not-allowed",
-                      }
+              {(() => {
+                const atLimit = usage !== null && usage.remaining === 0;
+                const isPro = usage?.plan === "pro";
+                const isDisabled = !canStart || atLimit;
+
+                let buttonLabel: string;
+                if (!hasFiles) {
+                  buttonLabel = "Add resume files above";
+                } else if (!hasJD) {
+                  buttonLabel = "Paste a job description to start";
+                } else if (atLimit) {
+                  buttonLabel = "Limit reached — upgrade to continue";
+                } else if (canStart && usage !== null && !isPro) {
+                  buttonLabel = `Analyze ${files.length} candidate${files.length !== 1 ? "s" : ""} → (${usage.remaining} remaining)`;
+                } else {
+                  buttonLabel = `Analyze ${files.length} candidate${files.length !== 1 ? "s" : ""} →`;
                 }
-              >
-                {canStart
-                  ? `Analyze ${files.length} candidate${files.length !== 1 ? "s" : ""} →`
-                  : !hasJD
-                  ? "Paste a job description to start"
-                  : "Add resume files above"}
-              </button>
-              <p className="text-center text-[11px] mt-3" style={{ color: "var(--text-faint)" }}>
-                Free to try · No account needed
-              </p>
+
+                return (
+                  <button
+                    onClick={handleStart}
+                    disabled={isDisabled}
+                    className="w-full py-3 rounded-xl text-sm font-semibold transition-all duration-300 active:scale-[0.98]"
+                    style={
+                      !isDisabled
+                        ? {
+                            background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
+                            color: "#fff",
+                            boxShadow: "0 0 24px rgba(124,92,255,0.3), 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.15)",
+                          }
+                        : {
+                            background: "var(--btn-disabled-bg)",
+                            color: "var(--btn-disabled-text)",
+                            cursor: "not-allowed",
+                          }
+                    }
+                  >
+                    {buttonLabel}
+                  </button>
+                );
+              })()}
+
+              {/* ── Usage counter ── */}
+              {usage !== null && (
+                <p
+                  className="text-center text-[11px] mt-3"
+                  style={{
+                    color:
+                      usage.remaining === 0
+                        ? "#f87171"
+                        : usage.remaining <= 2
+                        ? "#fbbf24"
+                        : "var(--text-faint)",
+                  }}
+                >
+                  {usage.plan === "pro"
+                    ? "Unlimited analyses"
+                    : usage.plan === "anonymous"
+                    ? `${usage.remaining}/${usage.limit} free analyses remaining`
+                    : `${usage.used}/${usage.limit} analyses used this month`}
+                </p>
+              )}
+              {usage === null && (
+                <p className="text-center text-[11px] mt-3" style={{ color: "var(--text-faint)" }}>
+                  Free to try · No account needed
+                </p>
+              )}
             </>
           )}
         </div>
@@ -762,6 +840,100 @@ export default function HomePage() {
             &copy; {new Date().getFullYear()} HireIQ · Evidence-first hiring
           </p>
         </footer>
+      )}
+
+      {/* ── Limit / Upgrade Modal ── */}
+      {limitModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center px-4"
+          style={{ background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+        >
+          <div
+            className="relative w-full max-w-sm rounded-2xl p-8"
+            style={{
+              background: "var(--card-bg)",
+              border: "1px solid var(--card-border)",
+              boxShadow: "0 24px 80px rgba(0,0,0,0.4), 0 0 60px rgba(124,92,255,0.08)",
+            }}
+          >
+            {/* Purple accent line */}
+            <div
+              className="absolute top-0 left-1/2 -translate-x-1/2 w-24 h-0.5 rounded-full"
+              style={{ background: "linear-gradient(90deg, transparent, #7c5cff, transparent)" }}
+            />
+
+            {limitModal.plan === "anonymous" ? (
+              <>
+                <p className="text-[18px] font-semibold leading-snug mb-2" style={{ color: "var(--text-heading)" }}>
+                  You&rsquo;ve used all {limitModal.limit} free analyses
+                </p>
+                <p className="text-[14px] leading-relaxed mb-6" style={{ color: "var(--text-muted)" }}>
+                  Create a free account to get{" "}
+                  <span className="font-semibold" style={{ color: "var(--text-body)" }}>10 analyses per month</span>
+                </p>
+                <Link
+                  href="/signup"
+                  className="block w-full text-center py-3 rounded-xl text-sm font-semibold transition-all duration-200 active:scale-[0.98] mb-4"
+                  style={{
+                    background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
+                    color: "#fff",
+                    boxShadow: "0 0 24px rgba(124,92,255,0.3), 0 2px 8px rgba(0,0,0,0.3)",
+                  }}
+                >
+                  Create free account
+                </Link>
+                <p className="text-center text-[12px]" style={{ color: "var(--text-muted)" }}>
+                  Already have an account?{" "}
+                  <Link href="/login" className="font-medium" style={{ color: "rgba(124,92,255,0.9)" }}>
+                    Sign in
+                  </Link>
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-[18px] font-semibold leading-snug mb-2" style={{ color: "var(--text-heading)" }}>
+                  You&rsquo;ve used all {limitModal.limit} analyses this month
+                </p>
+                <p className="text-[14px] leading-relaxed mb-1" style={{ color: "var(--text-muted)" }}>
+                  Upgrade to Pro for{" "}
+                  <span className="font-semibold" style={{ color: "var(--text-body)" }}>unlimited analyses</span>
+                </p>
+                <p className="text-[12px] mb-6" style={{ color: "var(--text-faint)" }}>
+                  $19/month · Cancel anytime
+                </p>
+                <Link
+                  href="/signup"
+                  className="block w-full text-center py-3 rounded-xl text-sm font-semibold transition-all duration-200 active:scale-[0.98] mb-4"
+                  style={{
+                    background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
+                    color: "#fff",
+                    boxShadow: "0 0 24px rgba(124,92,255,0.3), 0 2px 8px rgba(0,0,0,0.3)",
+                  }}
+                >
+                  Upgrade to Pro
+                </Link>
+                <p className="text-center text-[12px]" style={{ color: "var(--text-faint)" }}>
+                  Your limit resets next month
+                </p>
+              </>
+            )}
+
+            {/* Dismiss */}
+            <div className="flex justify-end mt-6">
+              <button
+                onClick={() => setLimitModal(null)}
+                className="text-[12px] px-3 py-1.5 rounded-lg transition-all duration-150"
+                style={{
+                  color: "var(--text-faint)",
+                  border: "1px solid var(--card-border)",
+                  background: "var(--input-bg)",
+                }}
+              >
+                × Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

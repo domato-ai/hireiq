@@ -4,13 +4,15 @@ import uuid
 import logging
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
 from pydantic import BaseModel
 
 from app.services.parser import extract_text
 from app.services.extraction import extract_resume_structured, extract_jd_requirements
 from app.services.embeddings import generate as generate_embedding
 from app.services.scoring import score_candidate
+from app.services.usage import check_quota, record_usage, LIMITS
+from app.routers.auth import verify_token
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +53,41 @@ class AnalysisResponse(BaseModel):
     candidates: list[CandidateResult]
     total_processed: int
     total_skipped: int
+    usage: dict | None = None
+
+
+def _resolve_identity(request: Request, authorization: str | None) -> tuple[str, str]:
+    """Determine user identity and plan from auth header or IP."""
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization[7:]
+        payload = verify_token(token)
+        if payload:
+            email = payload.get("email", "")
+            # Look up user plan from auth store
+            from app.routers.auth import _users
+            user = _users.get(email, {})
+            return email, user.get("plan", "free")
+    # Anonymous: use IP
+    ip = request.client.host if request.client else "unknown"
+    return f"ip:{ip}", "anonymous"
+
+
+@router.get("/usage")
+async def get_usage(
+    request: Request,
+    authorization: str | None = Header(default=None),
+):
+    """Get current usage for the authenticated user or anonymous IP."""
+    identifier, plan = _resolve_identity(request, authorization)
+    return check_quota(identifier, plan)
 
 
 @router.post("", response_model=AnalysisResponse, status_code=200)
 async def analyze(
+    request: Request,
     jd_text: Annotated[str, Form(description="Job description text")],
     files: list[UploadFile] = File(description="Resume files (PDF/DOCX)"),
+    authorization: str | None = Header(default=None),
 ):
     """
     Full analysis pipeline:
@@ -64,11 +95,37 @@ async def analyze(
     2. For each resume file → extract text → extract structured data → score
     3. Return ranked candidates
     """
+    # Resolve identity
+    identifier, plan = _resolve_identity(request, authorization)
+
+    # Check quota
+    quota = check_quota(identifier, plan)
+    if not quota["allowed"]:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "message": "Monthly analysis limit reached",
+                "used": quota["used"],
+                "limit": quota["limit"],
+                "plan": plan,
+                "upgrade_hint": (
+                    "Sign up for free to get 10 analyses/month"
+                    if plan == "anonymous"
+                    else "Upgrade to Pro for unlimited analyses"
+                ),
+            },
+        )
+
     if not jd_text or len(jd_text.strip()) < 20:
         raise HTTPException(status_code=400, detail="Job description is too short")
 
     if not files:
         raise HTTPException(status_code=400, detail="No resume files provided")
+
+    # Enforce resume limit per plan
+    max_resumes = quota["resumes_per_analysis"]
+    if len(files) > max_resumes:
+        files = files[:max_resumes]
 
     analysis_id = str(uuid.uuid4())[:8]
 
@@ -152,10 +209,17 @@ async def analyze(
     logger.info("[%s] Analysis complete: %d candidates, %d skipped",
                 analysis_id, len(candidates), skipped)
 
+    # Record usage after successful processing
+    record_usage(identifier)
+
+    # Return updated quota with response
+    updated_quota = check_quota(identifier, plan)
+
     return AnalysisResponse(
         analysis_id=analysis_id,
         jd_requirements=jd_requirements,
         candidates=candidates,
         total_processed=len(candidates),
         total_skipped=skipped,
+        usage=updated_quota,
     )
