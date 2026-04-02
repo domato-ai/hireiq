@@ -759,22 +759,90 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* ── Feature pills (idle only) ── */}
+        {/* ── Pricing + features (idle only) ── */}
         {step === "idle" && (
-          <div className="flex flex-wrap items-center justify-center gap-3 mt-10 home-stagger-4">
-            {["Evidence-backed scores", "No hallucinations", "Private & secure", "Works in seconds"].map((text) => (
-              <span
-                key={text}
-                className="text-[11px] font-medium px-3 py-1.5 rounded-full"
+          <div className="w-full max-w-[640px] mt-12 home-stagger-4">
+            {/* Feature pills */}
+            <div className="flex flex-wrap items-center justify-center gap-2 mb-10">
+              {["Evidence-backed scores", "No hallucinations", "Private & secure", "Works in seconds"].map((text) => (
+                <span
+                  key={text}
+                  className="text-[11px] font-medium px-3 py-1.5 rounded-full"
+                  style={{
+                    color: "var(--text-muted)",
+                    border: "1px solid var(--card-border)",
+                    background: "var(--input-bg)",
+                  }}
+                >
+                  {text}
+                </span>
+              ))}
+            </div>
+
+            {/* Pricing section */}
+            <div className="grid grid-cols-2 gap-3">
+              {/* Free tier */}
+              <div
+                className="rounded-xl p-5"
                 style={{
-                  color: "var(--text-muted)",
+                  background: "var(--card-bg)",
                   border: "1px solid var(--card-border)",
-                  background: "var(--input-bg)",
                 }}
               >
-                {text}
-              </span>
-            ))}
+                <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Free</p>
+                <p className="font-display text-2xl mb-3" style={{ color: "var(--text-heading)" }}>$0</p>
+                <div className="space-y-2">
+                  {[
+                    "3 analyses without account",
+                    "10/month with free account",
+                    "Up to 10 resumes each",
+                    "Full scoring & evidence",
+                    "Compare candidates",
+                  ].map((f) => (
+                    <div key={f} className="flex items-start gap-2">
+                      <span className="text-[10px] mt-0.5" style={{ color: "#34d399" }}>✓</span>
+                      <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{f}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Pro tier */}
+              <div
+                className="rounded-xl p-5 relative overflow-hidden"
+                style={{
+                  background: "var(--card-bg)",
+                  border: "1px solid rgba(124,92,255,0.2)",
+                  boxShadow: "0 0 30px rgba(124,92,255,0.06)",
+                }}
+              >
+                <div
+                  className="absolute top-3 right-3 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                  style={{ background: "rgba(124,92,255,0.1)", color: "#a78bfa", border: "1px solid rgba(124,92,255,0.2)" }}
+                >
+                  Popular
+                </div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#a78bfa" }}>Pro</p>
+                <div className="flex items-baseline gap-1 mb-3">
+                  <span className="font-display text-2xl" style={{ color: "var(--text-heading)" }}>$19</span>
+                  <span className="text-[12px]" style={{ color: "var(--text-faint)" }}>/month</span>
+                </div>
+                <div className="space-y-2">
+                  {[
+                    "Unlimited analyses",
+                    "Up to 50 resumes each",
+                    "Results saved & searchable",
+                    "Interview question generator",
+                    "Export shortlists as PDF",
+                  ].map((f) => (
+                    <div key={f} className="flex items-start gap-2">
+                      <span className="text-[10px] mt-0.5" style={{ color: "#a78bfa" }}>✓</span>
+                      <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{f}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -834,13 +902,18 @@ export default function HomePage() {
       </div>
 
       {/* ── Footer ── */}
-      {step !== "results" && (
-        <footer className="relative z-10 px-6 py-6 text-center" style={{ borderTop: "1px solid var(--divider)" }}>
+      <footer className="relative z-10 px-6 py-6 max-w-5xl mx-auto" style={{ borderTop: "1px solid var(--divider)" }}>
+        <div className="flex items-center justify-between">
           <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>
-            &copy; {new Date().getFullYear()} HireIQ · Evidence-first hiring
+            &copy; {new Date().getFullYear()} Domato AI Pty Ltd
           </p>
-        </footer>
-      )}
+          <div className="flex items-center gap-4">
+            <Link href="/terms" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Terms</Link>
+            <Link href="/privacy" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Privacy</Link>
+            <a href="mailto:support@domato.ai" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Contact</a>
+          </div>
+        </div>
+      </footer>
 
       {/* ── Limit / Upgrade Modal ── */}
       {limitModal && (
