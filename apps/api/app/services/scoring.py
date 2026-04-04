@@ -390,35 +390,66 @@ async def _score_skills(
     candidate: dict[str, Any],
     requirements: dict[str, Any],
 ) -> dict[str, Any]:
-    """Score skills match (0-100) with detailed evidence."""
-    # Combine skills + technologies for comprehensive matching
+    """Score skills match using LLM-assisted matching for accuracy across all industries."""
+    from app.services import llm
+
     raw_skills = list(candidate.get("skills") or [])
     raw_techs = list(candidate.get("technologies") or [])
     candidate_skills: list[str] = list({s.strip() for s in raw_skills + raw_techs if s and s.strip()})
     must_have: list[str] = [s.strip() for s in (requirements.get("must_have_skills") or []) if s]
     nice_to_have: list[str] = [s.strip() for s in (requirements.get("nice_to_have_skills") or []) if s]
 
-    candidate_skills_lower = [s.lower() for s in candidate_skills]
-
     if not must_have and not nice_to_have:
         return {
-            "score": 100.0,
-            "label": "Skills Match",
-            "weight": FACTOR_WEIGHTS["skills_match"],
-            "verdict": "strong",
-            "jd_required": "No skill requirements specified",
+            "score": 100.0, "label": "Skills Match", "weight": FACTOR_WEIGHTS["skills_match"],
+            "verdict": "strong", "jd_required": "No skill requirements specified",
             "candidate_has": f"{len(candidate_skills)} skills listed",
-            "reasoning": "No skill requirements specified in the JD; defaulting to full score.",
-            "matched": [],
-            "missing": [],
+            "reasoning": "No skill requirements specified in the JD.", "matched": [], "missing": [],
         }
 
-    must_matched = [s for s in must_have if _skills_match(s, candidate_skills_lower)]
-    must_missing = [s for s in must_have if not _skills_match(s, candidate_skills_lower)]
-    nice_matched = [s for s in nice_to_have if _skills_match(s, candidate_skills_lower)]
-    nice_missing = [s for s in nice_to_have if not _skills_match(s, candidate_skills_lower)]
+    # Use LLM to do intelligent matching — handles synonyms, abbreviations, related tech
+    try:
+        match_result = await llm.extract_json(
+            prompt=f"""JD requires these skills:
+Must-have: {', '.join(must_have)}
+Nice-to-have: {', '.join(nice_to_have)}
 
-    # Scoring: must-have worth 2 points each, nice-to-have worth 1 point each
+Candidate has these skills/technologies: {', '.join(candidate_skills)}
+
+Also consider the candidate's experience descriptions:
+{'; '.join(h for exp in (candidate.get('experience') or []) if isinstance(exp, dict) for h in (exp.get('highlights') or [])[:3])}""",
+            system="""You are a skills matching expert. Compare the JD requirements against the candidate's skills.
+A skill matches if the candidate has the SAME skill, an EQUIVALENT technology, or demonstrable experience with it.
+For example: "PySpark" matches "Apache Spark", "Azure Data Factory" matches "ADF" or "data pipelines using Azure Data Factory", "CI/CD" matches "Azure DevOps pipelines".
+
+Return JSON:
+{
+  "must_have_matched": ["skill1", "skill2"],
+  "must_have_missing": ["skill3"],
+  "nice_to_have_matched": ["skill4"],
+  "nice_to_have_missing": ["skill5"],
+  "reasoning": "2-3 sentence explanation of the skills alignment, noting key matches and gaps"
+}
+Be thorough — scan ALL candidate skills and experience for evidence of each required skill. Don't miss matches due to different terminology.""",
+        )
+
+        must_matched = match_result.get("must_have_matched", [])
+        must_missing = match_result.get("must_have_missing", [])
+        nice_matched = match_result.get("nice_to_have_matched", [])
+        nice_missing = match_result.get("nice_to_have_missing", [])
+        llm_reasoning = match_result.get("reasoning", "")
+
+    except Exception as e:
+        logger.warning("LLM skills matching failed, falling back to keyword: %s", e)
+        # Fallback to keyword matching
+        candidate_skills_lower = [s.lower() for s in candidate_skills]
+        must_matched = [s for s in must_have if _skills_match(s, candidate_skills_lower)]
+        must_missing = [s for s in must_have if not _skills_match(s, candidate_skills_lower)]
+        nice_matched = [s for s in nice_to_have if _skills_match(s, candidate_skills_lower)]
+        nice_missing = [s for s in nice_to_have if not _skills_match(s, candidate_skills_lower)]
+        llm_reasoning = ""
+
+    # Deterministic scoring from the match results
     max_points = len(must_have) * 2 + len(nice_to_have) * 1
     earned_points = len(must_matched) * 2 + len(nice_matched) * 1
     score = (earned_points / max_points) * 100.0 if max_points > 0 else 100.0
@@ -430,12 +461,7 @@ async def _score_skills(
     if nice_to_have:
         jd_required_parts.append(f"Nice-to-have: {', '.join(nice_to_have)}")
 
-    reasoning_parts = [
-        f"Matched {len(must_matched)}/{len(must_have)} must-have skills",
-        f"and {len(nice_matched)}/{len(nice_to_have)} nice-to-have skills.",
-    ]
-    if must_missing:
-        reasoning_parts.append(f"Missing critical skills: {', '.join(must_missing)}.")
+    reasoning = llm_reasoning or f"Matched {len(must_matched)}/{len(must_have)} must-have and {len(nice_matched)}/{len(nice_to_have)} nice-to-have skills."
 
     return {
         "score": score,
@@ -444,7 +470,7 @@ async def _score_skills(
         "verdict": _verdict(score),
         "jd_required": "; ".join(jd_required_parts),
         "candidate_has": ", ".join(candidate_skills) if candidate_skills else "No skills listed",
-        "reasoning": " ".join(reasoning_parts),
+        "reasoning": reasoning,
         "matched": must_matched + nice_matched,
         "missing": must_missing + nice_missing,
     }
@@ -551,93 +577,81 @@ async def _score_experience_relevance(
     candidate: dict[str, Any],
     requirements: dict[str, Any],
 ) -> dict[str, Any]:
-    """Score relevance of candidate's industry/domain experience (0-100)."""
-    text_blob = _get_candidate_text_blob(candidate)
-    role_title = str(requirements.get("title") or "").lower()
-    jd_must_have = [s.lower() for s in (requirements.get("must_have_skills") or [])]
-    jd_nice_to_have = [s.lower() for s in (requirements.get("nice_to_have_skills") or [])]
-    jd_responsibilities = [str(r).lower() for r in (requirements.get("responsibilities") or [])]
-    jd_text = " ".join([role_title] + jd_must_have + jd_nice_to_have + jd_responsibilities)
+    """Score relevance of candidate's experience using LLM for cross-industry understanding."""
+    from app.services import llm
 
-    if not text_blob.strip():
+    role_title = str(requirements.get("title") or "")
+    responsibilities = requirements.get("responsibilities") or []
+    candidate_experience = candidate.get("experience") or []
+    candidate_industries = candidate.get("industries") or []
+    candidate_summary = candidate.get("summary") or ""
+
+    # Build concise experience summary for the LLM
+    exp_lines = []
+    for exp in candidate_experience[:6]:  # Top 6 roles
+        if isinstance(exp, dict):
+            title = exp.get("title", "")
+            company = exp.get("company", "")
+            highlights = exp.get("highlights", [])
+            top_highlights = "; ".join(str(h) for h in highlights[:3])
+            exp_lines.append(f"{title} at {company}: {top_highlights}")
+
+    if not exp_lines and not candidate_summary:
         return {
-            "score": 0.0,
-            "label": "Experience Relevance",
-            "weight": FACTOR_WEIGHTS["experience_relevance"],
-            "verdict": "missing",
+            "score": 0.0, "label": "Experience Relevance",
+            "weight": FACTOR_WEIGHTS["experience_relevance"], "verdict": "missing",
             "jd_required": role_title or "Not specified",
             "candidate_has": "No experience data available",
-            "reasoning": "No candidate experience data to evaluate relevance.",
-            "matched": [],
-            "missing": [],
+            "reasoning": "No candidate experience data to evaluate.", "matched": [], "missing": [],
         }
 
-    # 1. Check domain/industry overlap
-    jd_domains: set[str] = set()
-    candidate_domains: set[str] = set()
-    for domain, keywords in DOMAIN_KEYWORDS.items():
-        if any(kw in jd_text for kw in keywords):
-            jd_domains.add(domain)
-        if any(kw in text_blob for kw in keywords):
-            candidate_domains.add(domain)
+    try:
+        result = await llm.extract_json(
+            prompt=f"""JD Role: {role_title}
+JD Responsibilities: {'; '.join(str(r) for r in responsibilities[:8])}
+JD Must-have skills: {', '.join(requirements.get('must_have_skills') or [])}
 
-    domain_overlap = jd_domains & candidate_domains
-    domain_missing = jd_domains - candidate_domains
+Candidate Summary: {candidate_summary}
+Candidate Industries: {', '.join(str(i) for i in candidate_industries)}
+Candidate Experience:
+{chr(10).join(exp_lines)}""",
+            system="""You are evaluating how relevant a candidate's work experience is to a specific role.
+Consider: industry alignment, responsibility overlap, domain expertise, and transferable experience.
+A data engineer working in government/healthcare with Azure is highly relevant to a data engineering role in hospitality — the technical skills transfer.
+Don't penalize industry differences if the core technical work is the same.
 
-    # 2. Check B2B/SaaS keywords
-    saas_jd = sum(1 for kw in SAAS_KEYWORDS if kw in jd_text)
-    saas_candidate = sum(1 for kw in SAAS_KEYWORDS if kw in text_blob)
+Return JSON:
+{
+  "score": 0-100,
+  "relevant_experience": ["brief description of relevant experience points"],
+  "gaps": ["areas where experience doesn't align"],
+  "reasoning": "2-3 sentence assessment of how well their experience prepares them for this role"
+}""",
+        )
 
-    # 3. Check company/role relevance via responsibility keyword overlap
-    resp_tokens = set()
-    for r in jd_responsibilities:
-        resp_tokens.update(t for t in r.split() if len(t) > 3)
-    resp_overlap = sum(1 for t in resp_tokens if t in text_blob) if resp_tokens else 0
-    resp_ratio = resp_overlap / len(resp_tokens) if resp_tokens else 0.5
+        score = float(result.get("score", 50))
+        score = round(min(max(score, 0), 100), 2)
+        relevant = result.get("relevant_experience", [])
+        gaps = result.get("gaps", [])
+        reasoning = result.get("reasoning", "")
 
-    # Compose score
-    domain_score = 0.0
-    if jd_domains:
-        domain_score = (len(domain_overlap) / len(jd_domains)) * 100.0
-    else:
-        domain_score = 60.0  # no domain requirements, neutral
-
-    saas_score = 0.0
-    if saas_jd > 0:
-        saas_score = min((saas_candidate / saas_jd) * 100.0, 100.0)
-    else:
-        saas_score = 60.0
-
-    resp_score = min(resp_ratio * 100.0, 100.0)
-
-    score = round(domain_score * 0.4 + saas_score * 0.3 + resp_score * 0.3, 2)
-    score = min(score, 100.0)
-
-    candidate_industries = list(candidate_domains) if candidate_domains else (candidate.get("industries") or [])
-    jd_required_str = f"Domains: {', '.join(jd_domains)}" if jd_domains else "No specific domain requirements"
-
-    reasoning_parts = []
-    if domain_overlap:
-        reasoning_parts.append(f"Matching domains: {', '.join(domain_overlap)}.")
-    if domain_missing:
-        reasoning_parts.append(f"Missing domain experience: {', '.join(domain_missing)}.")
-    if saas_jd > 0 and saas_candidate > 0:
-        reasoning_parts.append("B2B/SaaS experience signals detected.")
-    elif saas_jd > 0:
-        reasoning_parts.append("No B2B/SaaS experience signals found.")
-    if not reasoning_parts:
-        reasoning_parts.append("General experience relevance assessed via responsibility keyword overlap.")
+    except Exception as e:
+        logger.warning("LLM experience relevance failed, using fallback: %s", e)
+        score = 50.0
+        relevant = []
+        gaps = []
+        reasoning = "Could not assess experience relevance."
 
     return {
         "score": score,
         "label": "Experience Relevance",
         "weight": FACTOR_WEIGHTS["experience_relevance"],
         "verdict": _verdict(score),
-        "jd_required": jd_required_str,
-        "candidate_has": f"Industries: {', '.join(str(i) for i in candidate_industries)}" if candidate_industries else "No specific domain signals detected",
-        "reasoning": " ".join(reasoning_parts),
-        "matched": list(domain_overlap),
-        "missing": list(domain_missing),
+        "jd_required": f"Role: {role_title}" + (f"; Key responsibilities: {', '.join(str(r) for r in responsibilities[:3])}" if responsibilities else ""),
+        "candidate_has": f"Industries: {', '.join(str(i) for i in candidate_industries)}" if candidate_industries else candidate_summary[:100] if candidate_summary else "No domain data",
+        "reasoning": reasoning,
+        "matched": relevant,
+        "missing": gaps,
     }
 
 
