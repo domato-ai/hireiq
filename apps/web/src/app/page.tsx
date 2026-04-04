@@ -265,6 +265,7 @@ export default function HomePage() {
     setExpandedId(null);
     setSelectedIds(new Set());
     setCompareMode(false);
+    fetchUsage(); // Refresh usage counter
   };
 
   const toggleExpand = (id: string) => {

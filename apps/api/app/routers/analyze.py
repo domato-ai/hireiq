@@ -63,12 +63,19 @@ def _resolve_identity(request: Request, authorization: str | None) -> tuple[str,
         payload = verify_token(token)
         if payload:
             email = payload.get("email", "")
-            # Look up user plan from auth store
-            from app.routers.auth import _users
-            user = _users.get(email, {})
-            return email, user.get("plan", "free")
-    # Anonymous: use IP
-    ip = request.client.host if request.client else "unknown"
+            if email:
+                # Token is valid — use email as identity even if user isn't in memory
+                # (user store resets on container restart but token is still valid)
+                from app.routers.auth import _users
+                user = _users.get(email, {})
+                plan = user.get("plan", "free")  # Default to free if user not in memory
+                return email, plan
+    # Anonymous: use forwarded IP (Azure puts real IP in X-Forwarded-For)
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        ip = forwarded.split(",")[0].strip()
+    else:
+        ip = request.client.host if request.client else "unknown"
     return f"ip:{ip}", "anonymous"
 
 
