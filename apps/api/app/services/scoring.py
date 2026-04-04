@@ -89,6 +89,25 @@ SKILL_SYNONYMS: dict[str, set[str]] = {
     "elasticsearch": {"elasticsearch", "elastic search", "es"},
     "kafka": {"kafka", "apache kafka"},
     "spark": {"spark", "apache spark", "pyspark"},
+    "data factory": {"data factory", "azure data factory", "adf"},
+    "databricks": {"databricks", "azure databricks"},
+    "power bi": {"power bi", "powerbi"},
+    "data modelling": {"data modelling", "data modeling", "dimensional modelling", "dimensional modeling", "kimball", "star schema", "snowflake schema"},
+    "etl": {"etl", "elt", "extract transform load", "data pipelines", "data pipeline"},
+    "ssis": {"ssis", "sql server integration services"},
+    "ssrs": {"ssrs", "sql server reporting services"},
+    "data warehouse": {"data warehouse", "dwh", "data warehousing", "edw", "enterprise data warehouse"},
+    "microsoft fabric": {"microsoft fabric", "fabric"},
+    "lakehouse": {"lakehouse", "data lakehouse", "lake house", "medallion architecture"},
+    "devops": {"devops", "dev ops", "azure devops", "ci cd", "ci/cd pipelines"},
+    "api": {"api", "apis", "rest api", "rest apis", "web api"},
+    "data migration": {"data migration", "migration", "data migrations"},
+    "data governance": {"data governance", "data quality", "data stewardship"},
+    "t-sql": {"t-sql", "tsql", "transact-sql", "sql server"},
+    ".net": {".net", "dotnet", "asp.net", "asp .net", "c#"},
+    "azure functions": {"azure functions", "function apps", "serverless"},
+    "data engineering": {"data engineering", "data engineer"},
+    "stakeholder management": {"stakeholder management", "stakeholder engagement", "business stakeholders"},
 }
 
 # Build reverse lookup: normalized token -> canonical name
@@ -261,7 +280,7 @@ def _normalize_skill(skill: str) -> str:
 
 
 def _skills_match(req_skill: str, candidate_skills: list[str]) -> bool:
-    """Check if a required skill matches any candidate skill, using synonyms."""
+    """Check if a required skill matches any candidate skill, using synonyms and substring matching."""
     req_norm = _normalize_skill(req_skill)
     req_tokens = set(req_norm.split())
 
@@ -270,13 +289,16 @@ def _skills_match(req_skill: str, candidate_skills: list[str]) -> bool:
         # Exact canonical match
         if req_norm == cs_norm:
             return True
-        # Token overlap
+        # Substring containment (e.g. "data factory" in "azure data factory")
+        if req_norm in cs_norm or cs_norm in req_norm:
+            return True
+        # Token overlap — required is subset of candidate or vice versa
         cs_tokens = set(cs_norm.split())
         if req_tokens and cs_tokens and req_tokens <= cs_tokens:
             return True
         if req_tokens and cs_tokens and cs_tokens <= req_tokens:
             return True
-        # Partial: any significant token overlap (for multi-word skills)
+        # Partial: significant token overlap (for multi-word skills)
         if len(req_tokens) > 1 or len(cs_tokens) > 1:
             overlap = req_tokens & cs_tokens
             if overlap and len(overlap) >= max(1, min(len(req_tokens), len(cs_tokens)) - 1):
@@ -369,7 +391,10 @@ async def _score_skills(
     requirements: dict[str, Any],
 ) -> dict[str, Any]:
     """Score skills match (0-100) with detailed evidence."""
-    candidate_skills: list[str] = [s.strip() for s in (candidate.get("skills") or []) if s]
+    # Combine skills + technologies for comprehensive matching
+    raw_skills = list(candidate.get("skills") or [])
+    raw_techs = list(candidate.get("technologies") or [])
+    candidate_skills: list[str] = list({s.strip() for s in raw_skills + raw_techs if s and s.strip()})
     must_have: list[str] = [s.strip() for s in (requirements.get("must_have_skills") or []) if s]
     nice_to_have: list[str] = [s.strip() for s in (requirements.get("nice_to_have_skills") or []) if s]
 

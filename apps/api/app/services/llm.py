@@ -62,7 +62,7 @@ async def extract_json(prompt: str, system: str = "", model: str | None = None) 
         model=deployment,
         messages=messages,
         temperature=0.0,
-        max_tokens=3000,
+        max_tokens=6000,
         response_format={"type": "json_object"},
     )
 

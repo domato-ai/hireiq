@@ -40,27 +40,42 @@ def extract_contact_info(text: str) -> dict:
 
 # ── Tier 2: LLM extraction (GPT-4o-mini) ──
 
-RESUME_EXTRACTION_SYSTEM = """You are a precise resume parser. Extract structured information from the resume text.
+RESUME_EXTRACTION_SYSTEM = """You are a precise and thorough resume parser. Your job is to extract EVERY relevant piece of information from the resume.
+
+CRITICAL: Scan the ENTIRE resume — not just a skills section. Extract technologies, tools, platforms, and frameworks mentioned in:
+- Career synopsis / summary sections
+- Individual role descriptions and responsibilities
+- Project details and achievements
+- Certifications and training
+
 Return a JSON object with these exact fields:
 {
   "name": "Full name",
   "current_title": "Most recent job title",
   "current_company": "Most recent employer",
   "location": "City, State/Country or Remote",
-  "years_experience": number or null,
+  "years_experience": number (calculate from career history if not stated explicitly),
   "skills": ["skill1", "skill2", ...],
+  "technologies": ["tech1", "tech2", ...],
   "education": [{"degree": "...", "field": "...", "institution": "...", "year": number or null}],
   "experience": [{"title": "...", "company": "...", "duration": "...", "highlights": ["..."]}],
   "certifications": ["cert1", ...],
-  "summary": "1-2 sentence professional summary",
-  "achievements": ["Quantified achievement or metric, e.g. 'Increased ARR by 18%'", ...],
-  "leadership_evidence": ["Leadership or management mention, e.g. 'Led a team of 8 engineers'", ...],
-  "industries": ["Industry or domain, e.g. 'B2B SaaS', 'Fintech', 'Healthcare'", ...]
+  "summary": "2-3 sentence professional summary capturing their strongest value proposition",
+  "achievements": ["Full context phrase of quantified achievement", ...],
+  "leadership_evidence": ["Full context phrase of leadership/management mention", ...],
+  "industries": ["Industry or domain worked in", ...]
 }
-For "achievements": extract all quantified results, metrics, percentages, dollar amounts, user counts, and measurable outcomes mentioned in the resume. Include the full context phrase.
-For "leadership_evidence": extract all mentions of team leadership, management, mentoring, cross-functional collaboration, direct reports, and team sizes. Include the full context phrase.
-For "industries": extract all industries, domains, and verticals the candidate has worked in based on their companies and role descriptions.
-Only include information explicitly stated in the resume. Use null for missing fields. Use empty arrays [] if no items found. Do not infer or fabricate."""
+
+For "skills": Include BOTH soft skills (leadership, stakeholder management, agile) AND technical skills. Cast a wide net.
+For "technologies": Extract ALL technologies, tools, platforms, languages, frameworks, and cloud services mentioned ANYWHERE in the resume. Examples: Azure Data Factory, PySpark, Python, SQL, Databricks, Power BI, CI/CD, Azure DevOps, REST APIs, PostgreSQL, Docker, Kubernetes, Terraform, etc. Be exhaustive — scan every line.
+For "experience": Include ALL roles, not just the most recent. Include company name, title, and 2-3 key highlights per role.
+For "achievements": Extract ALL quantified results, metrics, percentages, and measurable outcomes. Include full context.
+For "leadership_evidence": Extract ALL mentions of team leadership, mentoring, managing, team sizes, direct reports, agile delivery management.
+For "industries": Extract ALL industries/domains/verticals from company descriptions and role contexts.
+For "years_experience": Calculate total years from the earliest role to the most recent. If stated in summary (e.g. "17+ years"), use that number.
+
+Be thorough. A recruiter is relying on this extraction to match candidates to jobs. Missing a key skill or technology means the candidate could be unfairly rejected.
+Only include information explicitly stated. Do not fabricate. Use empty arrays [] for missing lists."""
 
 async def extract_resume_structured(raw_text: str) -> dict:
     """Extract structured data from resume text using regex + LLM."""
@@ -68,9 +83,12 @@ async def extract_resume_structured(raw_text: str) -> dict:
     contact = extract_contact_info(raw_text)
 
     # Tier 2: LLM for skills, experience, education
+    # Send up to 12000 chars to capture full career history
+    # GPT-4o-mini supports 128k context, so this is well within limits
+    resume_text = raw_text[:12000] if len(raw_text) > 12000 else raw_text
     try:
         llm_result = await llm.extract_json(
-            prompt=f"Parse this resume:\n\n{raw_text[:4000]}",  # Cap at ~4000 chars
+            prompt=f"Parse this resume thoroughly. Extract ALL skills, technologies, tools, platforms, and frameworks mentioned anywhere in the resume — not just a skills section. Scan every role's responsibilities and achievements for technical skills.\n\n{resume_text}",
             system=RESUME_EXTRACTION_SYSTEM,
         )
     except Exception as e:
