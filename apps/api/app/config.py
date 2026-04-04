@@ -78,6 +78,16 @@ class Settings(BaseSettings):
     azure_openai_deployment_embedding: str = "text-embedding-3-small"
 
     # ------------------------------------------------------------------ #
+    # SMTP (contact form emails)
+    # ------------------------------------------------------------------ #
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_pass: str = ""
+    smtp_from: str = "noreply@domato.ai"
+    smtp_to: str = "support@domato.ai"
+
+    # ------------------------------------------------------------------ #
     # Plan limits (free tier)
     # ------------------------------------------------------------------ #
     free_tier_max_candidates_per_role: int = 10

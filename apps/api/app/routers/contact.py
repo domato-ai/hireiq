@@ -56,11 +56,10 @@ async def submit_contact(body: ContactRequest):
         body.message[:100],
     )
 
-    # Try to send email (non-blocking — if SMTP isn't configured, we still store it)
+    # Send email
     settings = get_settings()
-    smtp_host = getattr(settings, "smtp_host", "")
 
-    if smtp_host:
+    if settings.smtp_host:
         try:
             msg = MIMEText(
                 f"From: {body.name or 'Anonymous'} <{body.email}>\n"
@@ -68,25 +67,21 @@ async def submit_contact(body: ContactRequest):
                 f"{body.message}"
             )
             msg["Subject"] = f"[HireIQ Contact] {body.name or body.email}"
-            msg["From"] = "noreply@domato.ai"
-            msg["To"] = "support@domato.ai"
+            msg["From"] = settings.smtp_from
+            msg["To"] = settings.smtp_to
             msg["Reply-To"] = body.email
 
-            smtp_port = getattr(settings, "smtp_port", 587)
-            smtp_user = getattr(settings, "smtp_user", "")
-            smtp_pass = getattr(settings, "smtp_pass", "")
-
-            with smtplib.SMTP(smtp_host, smtp_port) as server:
+            with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
                 server.starttls()
-                if smtp_user and smtp_pass:
-                    server.login(smtp_user, smtp_pass)
+                if settings.smtp_user and settings.smtp_pass:
+                    server.login(settings.smtp_user, settings.smtp_pass)
                 server.send_message(msg)
 
-            logger.info("Contact email sent to support@domato.ai")
+            logger.info("Contact email sent to %s", settings.smtp_to)
         except Exception as e:
             logger.warning("Failed to send contact email: %s (message still stored)", e)
     else:
-        logger.info("SMTP not configured — message stored in memory only")
+        logger.info("SMTP not configured — message stored in memory. Set SMTP_HOST to enable.")
 
     return ContactResponse(
         status="sent",
