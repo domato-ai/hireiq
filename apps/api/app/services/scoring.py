@@ -1156,11 +1156,17 @@ def _build_strengths(
     if exp.get("score", 0) >= 80:
         candidate_years = candidate.get("years_experience")
         required_years = requirements.get("years_experience")
-        company = candidate.get("current_company") or ""
         if candidate_years is not None and required_years is not None:
-            company_str = f" at {company}" if company else ""
+            # List companies worked at (not just current) to avoid false attribution
+            companies = []
+            for role in (candidate.get("experience") or [])[:4]:
+                if isinstance(role, dict) and role.get("company"):
+                    c = str(role["company"]).strip()
+                    if c and c not in companies:
+                        companies.append(c)
+            company_str = f" across {', '.join(companies)}" if len(companies) > 1 else f" (currently at {companies[0]})" if companies else ""
             strengths.append(
-                f"{candidate_years} years of experience{company_str} -- "
+                f"{candidate_years} years of experience{company_str} — "
                 f"{'exceeds' if float(candidate_years) > float(required_years) else 'meets'} "
                 f"the {required_years}-year requirement"
             )
@@ -1345,11 +1351,21 @@ def _build_summary(
 
     sentences = [f"{rec_label}."]
 
-    # Experience sentence
+    # Experience sentence — list multiple companies, don't attribute all years to one
     if years is not None:
+        companies = []
+        for role in (candidate.get("experience") or [])[:4]:
+            if isinstance(role, dict) and role.get("company"):
+                c = str(role["company"]).strip()
+                if c and c not in companies:
+                    companies.append(c)
         exp_str = f"{intro} brings {years} years of experience"
-        if company:
-            exp_str += f" including work at {company}"
+        if len(companies) > 1:
+            exp_str += f" across {', '.join(companies[:3])}"
+            if len(companies) > 3:
+                exp_str += f" and {len(companies) - 3} more"
+        elif companies:
+            exp_str += f", most recently at {companies[0]}"
         sentences.append(exp_str + ".")
     else:
         sentences.append(f"{intro} is being evaluated for {role_title}.")
