@@ -831,9 +831,9 @@ export default function HomePage() {
                   {[
                     "Unlimited analyses",
                     "Up to 50 resumes each",
-                    "Results saved & searchable",
-                    "Interview question generator",
-                    "Export shortlists as PDF",
+                    "8-factor evidence scoring",
+                    "Side-by-side comparison",
+                    "Priority support",
                   ].map((f) => (
                     <div key={f} className="flex items-start gap-2">
                       <span className="text-[10px] mt-0.5" style={{ color: "#a78bfa" }}>✓</span>
