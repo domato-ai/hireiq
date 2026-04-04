@@ -327,7 +327,7 @@ export default function HomePage() {
           ) : (
             <>
               <Link href="/signup" className="text-[13px] transition-colors" style={{ color: "var(--text-muted)" }}>
-                Create workspace
+                Sign up
               </Link>
               <ThemeToggle />
               <Link
@@ -910,7 +910,7 @@ export default function HomePage() {
           <div className="flex items-center gap-4">
             <Link href="/terms" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Terms</Link>
             <Link href="/privacy" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Privacy</Link>
-            <a href="mailto:support@domato.ai" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Contact</a>
+            <Link href="/contact" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Contact</Link>
           </div>
         </div>
       </footer>
