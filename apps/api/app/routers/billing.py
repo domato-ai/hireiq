@@ -69,15 +69,12 @@ async def create_checkout(
 
     email = user["email"]
 
-    # Use the SWA URL for now — will switch to hireiq.domato.ai when domain is set up
-    base_url = "https://kind-tree-0d675b200.6.azurestaticapps.net"
-
     try:
         session = stripe_lib.checkout.Session.create(
             mode="subscription",
             line_items=[{"price": settings.stripe_price_id_pro, "quantity": 1}],
-            success_url=f"{base_url}/?upgraded=true",
-            cancel_url=f"{base_url}/",
+            success_url="https://hireiq.domato.ai/?upgraded=true",
+            cancel_url="https://hireiq.domato.ai/",
             customer_email=email,
             metadata={"email": email},
         )

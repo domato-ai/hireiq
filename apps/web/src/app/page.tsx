@@ -129,8 +129,12 @@ export default function HomePage() {
         } catch {}
         // Clean URL
         window.history.replaceState({}, "", "/");
-        // Auto-hide toast after 5s
-        setTimeout(() => setUpgraded(false), 5000);
+        // Refresh usage to reflect pro plan
+        setTimeout(() => {
+          fetchUsage();
+        }, 500);
+        // Auto-hide toast after 8s
+        setTimeout(() => setUpgraded(false), 8000);
       }
     }
   }, []);
@@ -432,14 +436,28 @@ export default function HomePage() {
             : "Paste a job description, upload resumes, and get an evidence-backed shortlist in seconds."}
         </p>
 
-        {/* ── Upgrade success toast ── */}
+        {/* ── Upgrade success banner ── */}
         {upgraded && (
           <div
-            className="w-full max-w-[640px] mb-4 px-4 py-3 rounded-xl text-sm flex items-center gap-2"
-            style={{ background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.2)", color: "#34d399" }}
+            className="w-full max-w-[640px] mb-6 rounded-2xl p-6 text-center"
+            style={{
+              background: "rgba(52,211,153,0.08)",
+              border: "1px solid rgba(52,211,153,0.2)",
+              boxShadow: "0 0 40px rgba(52,211,153,0.08)",
+            }}
           >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6 11.5L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            Welcome to Pro! You now have unlimited analyses.
+            <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3"
+              style={{ background: "rgba(52,211,153,0.15)" }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <path d="M5 13L9 17L19 7" stroke="#34d399" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            <p className="text-lg font-display mb-1" style={{ color: "#34d399" }}>
+              Welcome to HireIQ Pro!
+            </p>
+            <p className="text-[13px]" style={{ color: "var(--text-muted)" }}>
+              You now have unlimited analyses with up to 50 resumes each. Happy hiring!
+            </p>
           </div>
         )}
 
