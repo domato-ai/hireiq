@@ -125,8 +125,8 @@ export default function SignupPage() {
 
         <p className="text-[11px] mt-6 text-center max-w-sm home-stagger-4" style={{ color: 'var(--text-faint)' }}>
           By creating an account you agree to our{" "}
-          <a href="/legal/terms" className="underline underline-offset-2">Terms</a> and{" "}
-          <a href="/legal/privacy" className="underline underline-offset-2">Privacy Policy</a>
+          <a href="/terms" className="underline underline-offset-2">Terms</a> and{" "}
+          <a href="/privacy" className="underline underline-offset-2">Privacy Policy</a>
         </p>
       </div>
     </div>

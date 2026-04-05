@@ -98,8 +98,8 @@ export const PROTECTED_ROUTES = ["/workspaces", "/billing", "/settings"];
 export const PUBLIC_ROUTES = [
   "/login",
   "/signup",
-  "/legal/terms",
-  "/legal/privacy",
+  "/terms",
+  "/privacy",
   "/api/auth",
 ];
 

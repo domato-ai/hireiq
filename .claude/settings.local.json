@@ -10,7 +10,21 @@
       "Bash(taskkill //F //IM node.exe //FI \"WINDOWTITLE eq npm\")",
       "Bash(npx next:*)",
       "WebFetch(domain:www.todesktop.com)",
-      "WebFetch(domain:openclaw.ai)"
+      "WebFetch(domain:openclaw.ai)",
+      "Bash(ENVIRONMENT=development timeout 5 py -m uvicorn app.main:app --host 127.0.0.1 --port 8001)",
+      "Bash(curl -s --max-time 60 \"https://ca-hireiq-api-dev.delightfulsea-504dfc83.australiaeast.azurecontainerapps.io/health\")",
+      "Bash(curl -s --max-time 15 \"https://ca-hireiq-api-dev.delightfulsea-504dfc83.australiaeast.azurecontainerapps.io/api/v1/analyze/usage\")",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(grep -r \"MAIL_\\\\|EMAIL_\\\\|smtp\" /c/Users/shriw/OneDrive/Domato/RoleFitAI/apps/api --include=*.py)",
+      "Bash(find /c/Users/shriw/OneDrive/Domato -type f \\\\\\(-name *.md -o -name *.txt \\\\\\) ! -path */node_modules/* ! -path */.next/*)",
+      "Bash(xargs grep:*)",
+      "Bash(chcp.com 65001)",
+      "Bash(az acr:*)",
+      "Bash(az containerapp:*)",
+      "Bash(swa deploy:*)",
+      "Bash(curl:*)"
     ]
   }
 }
