@@ -27,8 +27,15 @@ export const metadata: Metadata = {
     "Hiring decision workspace. Surface signal, not noise. Make defensible calls faster.",
   keywords: ["hiring", "recruiting", "candidate evaluation", "AI screening"],
   authors: [{ name: "HireIQ" }],
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: "/icon-192.png",
+  },
   robots: {
-    index: false, // Private app — no public indexing
+    index: false,
     follow: false,
   },
 };
