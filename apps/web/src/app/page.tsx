@@ -105,11 +105,34 @@ export default function HomePage() {
   const [usage, setUsage] = useState<{ used: number; limit: number; remaining: number; plan: string } | null>(null);
   const [limitModal, setLimitModal] = useState<{ plan: string; used: number; limit: number; hint: string } | null>(null);
 
+  const [upgraded, setUpgraded] = useState(false);
+
   useEffect(() => {
     try {
       const stored = localStorage.getItem("hireiq-user");
       if (stored) setUser(JSON.parse(stored));
     } catch {}
+    // Check for ?upgraded=true from Stripe redirect
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("upgraded") === "true") {
+        setUpgraded(true);
+        // Update stored user plan to pro
+        try {
+          const stored = localStorage.getItem("hireiq-user");
+          if (stored) {
+            const u = JSON.parse(stored);
+            u.plan = "pro";
+            localStorage.setItem("hireiq-user", JSON.stringify(u));
+            setUser(u);
+          }
+        } catch {}
+        // Clean URL
+        window.history.replaceState({}, "", "/");
+        // Auto-hide toast after 5s
+        setTimeout(() => setUpgraded(false), 5000);
+      }
+    }
   }, []);
 
   const fetchUsage = async () => {
@@ -389,6 +412,17 @@ export default function HomePage() {
             ? "Ranked by evidence strength. Click a card to see full analysis."
             : "Paste a job description, upload resumes, and get an evidence-backed shortlist in seconds."}
         </p>
+
+        {/* ── Upgrade success toast ── */}
+        {upgraded && (
+          <div
+            className="w-full max-w-[640px] mb-4 px-4 py-3 rounded-xl text-sm flex items-center gap-2"
+            style={{ background: "rgba(52,211,153,0.1)", border: "1px solid rgba(52,211,153,0.2)", color: "#34d399" }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6 11.5L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Welcome to Pro! You now have unlimited analyses.
+          </div>
+        )}
 
         {/* ── Error banner ── */}
         {error && (
@@ -975,17 +1009,36 @@ export default function HomePage() {
                 <p className="text-[12px] mb-6" style={{ color: "var(--text-faint)" }}>
                   $19/month · Cancel anytime
                 </p>
-                <Link
-                  href="/signup"
-                  className="block w-full text-center py-3 rounded-xl text-sm font-semibold transition-all duration-200 active:scale-[0.98] mb-4"
+                <button
+                  onClick={async () => {
+                    try {
+                      const token = localStorage.getItem("hireiq-token");
+                      if (!token) { window.location.href = "/signup"; return; }
+                      const res = await fetch(`${API_URL}/api/v1/billing/checkout`, {
+                        method: "POST",
+                        headers: { "Authorization": `Bearer ${token}` },
+                      });
+                      const data = await res.json();
+                      if (res.ok && data.url) {
+                        window.location.href = data.url;
+                      } else {
+                        setError(data.detail || "Failed to start checkout");
+                        setLimitModal(null);
+                      }
+                    } catch {
+                      setError("Failed to connect to payment provider");
+                      setLimitModal(null);
+                    }
+                  }}
+                  className="block w-full text-center py-3 rounded-xl text-sm font-semibold transition-all duration-200 active:scale-[0.98] mb-4 cursor-pointer"
                   style={{
                     background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
                     color: "#fff",
                     boxShadow: "0 0 24px rgba(124,92,255,0.3), 0 2px 8px rgba(0,0,0,0.3)",
                   }}
                 >
-                  Upgrade to Pro
-                </Link>
+                  Upgrade to Pro — $19/mo
+                </button>
                 <p className="text-center text-[12px]" style={{ color: "var(--text-faint)" }}>
                   Your limit resets next month
                 </p>
