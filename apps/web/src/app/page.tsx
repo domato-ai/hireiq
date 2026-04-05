@@ -156,6 +156,25 @@ export default function HomePage() {
     setUser(null);
   };
 
+  const handleUpgrade = async () => {
+    const token = localStorage.getItem("hireiq-token");
+    if (!token) { window.location.href = "/signup"; return; }
+    try {
+      const res = await fetch(`${API_URL}/api/v1/billing/checkout`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+      } else {
+        setError(data.detail || "Failed to start checkout");
+      }
+    } catch {
+      setError("Failed to connect to payment provider");
+    }
+  };
+
   // Progress pipeline steps — timed to match real API processing
   const progressSteps = [
     { label: "Reading job description", detail: "Extracting role requirements, must-have skills, and seniority level", icon: "📋", pct: 8 },
@@ -862,7 +881,7 @@ export default function HomePage() {
                   <span className="font-display text-2xl" style={{ color: "var(--text-heading)" }}>$19</span>
                   <span className="text-[12px]" style={{ color: "var(--text-faint)" }}>/month</span>
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 mb-4">
                   {[
                     "Unlimited analyses",
                     "Up to 50 resumes each",
@@ -876,6 +895,17 @@ export default function HomePage() {
                     </div>
                   ))}
                 </div>
+                <button
+                  onClick={handleUpgrade}
+                  className="w-full py-2.5 rounded-lg text-[12px] font-semibold transition-all duration-200 active:scale-[0.98]"
+                  style={{
+                    background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
+                    color: "#fff",
+                    boxShadow: "0 0 16px rgba(124,92,255,0.25)",
+                  }}
+                >
+                  {user ? "Upgrade to Pro" : "Sign up & upgrade"}
+                </button>
               </div>
             </div>
           </div>
