@@ -160,6 +160,27 @@ export default function HomePage() {
     setUser(null);
   };
 
+  const isPro = user?.plan === "pro" || (usage?.plan === "pro");
+
+  const handleManageSubscription = async () => {
+    const token = localStorage.getItem("hireiq-token");
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/v1/billing/portal`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+      } else {
+        setError(data.detail || "Failed to open subscription management");
+      }
+    } catch {
+      setError("Failed to connect to billing provider");
+    }
+  };
+
   const handleUpgrade = async () => {
     const token = localStorage.getItem("hireiq-token");
     if (!token) { window.location.href = "/signup"; return; }
@@ -851,81 +872,141 @@ export default function HomePage() {
               ))}
             </div>
 
-            {/* Pricing section */}
-            <div className="grid grid-cols-2 gap-3">
-              {/* Free tier */}
+            {/* Pricing section — adapts based on user plan */}
+            {isPro ? (
+              /* Pro user — show active plan card */
               <div
-                className="rounded-xl p-5"
+                className="rounded-xl p-6 relative overflow-hidden"
                 style={{
                   background: "var(--card-bg)",
-                  border: "1px solid var(--card-border)",
+                  border: "1px solid rgba(52,211,153,0.2)",
+                  boxShadow: "0 0 30px rgba(52,211,153,0.06)",
                 }}
               >
-                <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Free</p>
-                <p className="font-display text-2xl mb-3" style={{ color: "var(--text-heading)" }}>$0</p>
-                <div className="space-y-2">
-                  {[
-                    "3 analyses without account",
-                    "10/month with free account",
-                    "Up to 10 resumes each",
-                    "Full scoring & evidence",
-                    "Compare candidates",
-                  ].map((f) => (
-                    <div key={f} className="flex items-start gap-2">
-                      <span className="text-[10px] mt-0.5" style={{ color: "#34d399" }}>✓</span>
-                      <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{f}</span>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "rgba(52,211,153,0.1)" }}>
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M3 8.5L6 11.5L13 4" stroke="#34d399" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      </svg>
                     </div>
-                  ))}
+                    <div>
+                      <p className="text-[14px] font-semibold" style={{ color: "var(--text-heading)" }}>HireIQ Pro</p>
+                      <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>A$19/month · Active</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full"
+                    style={{ background: "rgba(52,211,153,0.1)", color: "#34d399", border: "1px solid rgba(52,211,153,0.2)" }}>
+                    Active
+                  </span>
                 </div>
-              </div>
-
-              {/* Pro tier */}
-              <div
-                className="rounded-xl p-5 relative overflow-hidden"
-                style={{
-                  background: "var(--card-bg)",
-                  border: "1px solid rgba(124,92,255,0.2)",
-                  boxShadow: "0 0 30px rgba(124,92,255,0.06)",
-                }}
-              >
-                <div
-                  className="absolute top-3 right-3 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
-                  style={{ background: "rgba(124,92,255,0.1)", color: "#a78bfa", border: "1px solid rgba(124,92,255,0.2)" }}
-                >
-                  Popular
-                </div>
-                <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#a78bfa" }}>Pro</p>
-                <div className="flex items-baseline gap-1 mb-3">
-                  <span className="font-display text-2xl" style={{ color: "var(--text-heading)" }}>$19</span>
-                  <span className="text-[12px]" style={{ color: "var(--text-faint)" }}>/month</span>
-                </div>
-                <div className="space-y-2 mb-4">
+                <div className="grid grid-cols-3 gap-3 mb-4">
                   {[
-                    "Unlimited analyses",
-                    "Up to 50 resumes each",
-                    "8-factor evidence scoring",
-                    "Side-by-side comparison",
-                    "Priority support",
-                  ].map((f) => (
-                    <div key={f} className="flex items-start gap-2">
-                      <span className="text-[10px] mt-0.5" style={{ color: "#a78bfa" }}>✓</span>
-                      <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{f}</span>
+                    { value: "Unlimited", label: "Analyses" },
+                    { value: "50", label: "Resumes each" },
+                    { value: "8", label: "Scoring factors" },
+                  ].map((s) => (
+                    <div key={s.label} className="text-center py-2 rounded-lg" style={{ background: "var(--input-bg)" }}>
+                      <p className="text-[14px] font-display" style={{ color: "var(--text-heading)" }}>{s.value}</p>
+                      <p className="text-[10px]" style={{ color: "var(--text-faint)" }}>{s.label}</p>
                     </div>
                   ))}
                 </div>
                 <button
-                  onClick={handleUpgrade}
-                  className="w-full py-2.5 rounded-lg text-[12px] font-semibold transition-all duration-200 active:scale-[0.98]"
+                  onClick={handleManageSubscription}
+                  className="w-full py-2.5 rounded-lg text-[12px] font-medium transition-all duration-200"
                   style={{
-                    background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
-                    color: "#fff",
-                    boxShadow: "0 0 16px rgba(124,92,255,0.25)",
+                    color: "var(--text-muted)",
+                    border: "1px solid var(--card-border)",
+                    background: "var(--input-bg)",
                   }}
                 >
-                  {user ? "Upgrade to Pro" : "Sign up & upgrade"}
+                  Manage subscription
                 </button>
               </div>
-            </div>
+            ) : (
+              /* Free/anonymous user — show pricing comparison */
+              <div className="grid grid-cols-2 gap-3">
+                {/* Free tier */}
+                <div
+                  className="rounded-xl p-5"
+                  style={{
+                    background: "var(--card-bg)",
+                    border: `1px solid ${user ? "rgba(52,211,153,0.2)" : "var(--card-border)"}`,
+                  }}
+                >
+                  {user && (
+                    <div className="text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full inline-block mb-2"
+                      style={{ background: "rgba(52,211,153,0.1)", color: "#34d399", border: "1px solid rgba(52,211,153,0.2)" }}>
+                      Current plan
+                    </div>
+                  )}
+                  <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>Free</p>
+                  <p className="font-display text-2xl mb-3" style={{ color: "var(--text-heading)" }}>$0</p>
+                  <div className="space-y-2">
+                    {[
+                      "3 analyses without account",
+                      "10/month with free account",
+                      "Up to 10 resumes each",
+                      "Full scoring & evidence",
+                      "Compare candidates",
+                    ].map((f) => (
+                      <div key={f} className="flex items-start gap-2">
+                        <span className="text-[10px] mt-0.5" style={{ color: "#34d399" }}>✓</span>
+                        <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{f}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Pro tier */}
+                <div
+                  className="rounded-xl p-5 relative overflow-hidden"
+                  style={{
+                    background: "var(--card-bg)",
+                    border: "1px solid rgba(124,92,255,0.2)",
+                    boxShadow: "0 0 30px rgba(124,92,255,0.06)",
+                  }}
+                >
+                  <div
+                    className="absolute top-3 right-3 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full"
+                    style={{ background: "rgba(124,92,255,0.1)", color: "#a78bfa", border: "1px solid rgba(124,92,255,0.2)" }}
+                  >
+                    Recommended
+                  </div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#a78bfa" }}>Pro</p>
+                  <div className="flex items-baseline gap-1 mb-3">
+                    <span className="font-display text-2xl" style={{ color: "var(--text-heading)" }}>$19</span>
+                    <span className="text-[12px]" style={{ color: "var(--text-faint)" }}>/month</span>
+                  </div>
+                  <div className="space-y-2 mb-4">
+                    {[
+                      "Unlimited analyses",
+                      "Up to 50 resumes each",
+                      "8-factor evidence scoring",
+                      "Side-by-side comparison",
+                      "Priority support",
+                    ].map((f) => (
+                      <div key={f} className="flex items-start gap-2">
+                        <span className="text-[10px] mt-0.5" style={{ color: "#a78bfa" }}>✓</span>
+                        <span className="text-[12px]" style={{ color: "var(--text-muted)" }}>{f}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={handleUpgrade}
+                    className="w-full py-2.5 rounded-lg text-[12px] font-semibold transition-all duration-200 active:scale-[0.98]"
+                    style={{
+                      background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
+                      color: "#fff",
+                      boxShadow: "0 0 16px rgba(124,92,255,0.25)",
+                    }}
+                  >
+                    {user ? "Upgrade to Pro" : "Sign up & upgrade"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
