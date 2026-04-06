@@ -1473,6 +1473,17 @@ async function scrapeGoogle(){{
   loadContacts();
 }}
 
+async function scrapeRecruiters(){{
+  if(!confirm('Scrape team pages of seeded agencies for individual recruiter names and emails? (processes 10 agencies, may take a minute)'))return;
+  const status=document.getElementById('enrich-status');
+  status.textContent='Scraping team pages...';
+  const r=await api('/scrape-recruiters?limit=10',{{method:'POST'}});
+  if(r.error){{toast('Error: '+r.error,false);status.textContent='';return;}}
+  toast('Found '+r.total_recruiters_found+' recruiters from '+r.agencies_processed+' agencies',true);
+  status.textContent=r.total_recruiters_found+' recruiters from '+r.agencies_processed+' agencies';
+  loadContacts();
+}}
+
 async function enrichOne(id){{
   const status=document.getElementById('enrich-status');
   status.textContent='Enriching 1 contact...';
