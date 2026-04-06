@@ -59,7 +59,7 @@ _USER = "outreach manager"
 _PASS = "Domato2025!"
 _COOKIE = "hiq_outreach"
 _EXP_H = 12
-BACKEND_URL = "https://hireiqapi.domato.ai"
+BACKEND_URL = "https://ca-hireiq-api-dev.delightfulsea-504dfc83.australiaeast.azurecontainerapps.io"
 WEBSITE = "https://hireiq.domato.ai"
 FROM_EMAIL = settings.smtp_from or "support@domato.ai"
 FROM_NAME = "HireIQ"
@@ -183,8 +183,8 @@ def _build_email_html(contact: dict) -> str:
     h = hooks.get(industry, hooks["general"])
 
     signup_url = _tracked_url(f"{WEBSITE}?ref=outreach", email)
-    features_url = _tracked_url(f"{WEBSITE}/features", email)
-    pricing_url = _tracked_url(f"{WEBSITE}/pricing", email)
+    features_url = _tracked_url(WEBSITE, email)  # Single-page app — features are on the homepage
+    pricing_url = _tracked_url(WEBSITE, email)   # Pricing is inline on the homepage
     contact_url = _tracked_url(f"{WEBSITE}/contact", email)
     unsub_url = _unsubscribe_url(email)
 
@@ -1017,6 +1017,103 @@ async def seed_from_csv(
     return {"total_in_csv": len(rows), "created": created, "skipped": skipped}
 
 
+@router.post("/api/scrape-recruiters")
+async def scrape_recruiters_from_agencies(
+    limit: int = 10,
+    hiq_outreach: str | None = Cookie(None),
+):
+    """Scrape team pages of seeded agencies to find individual recruiter names + emails.
+
+    For each agency contact that has a website but no individual recruiter contacts,
+    scrapes the team/people page for names, guesses emails from the domain.
+    Creates new individual contacts linked to the agency.
+    """
+    if not _verify(hiq_outreach):
+        return JSONResponse({"error": "Unauthorized"}, 401)
+
+    from app.services.recruiter_scraper import scrape_agency_for_recruiters
+
+    # Find agency contacts with websites that we haven't scraped yet
+    agencies_to_scrape = []
+    for cid, c in _contacts.items():
+        if (
+            c.get("website")
+            and c.get("source") in ("au_agencies_csv", "google_search", "rcsa_directory")
+            and not c.get("_recruiters_scraped")
+        ):
+            agencies_to_scrape.append((cid, c))
+        if len(agencies_to_scrape) >= limit:
+            break
+
+    total_recruiters = 0
+    agencies_processed = 0
+    results = []
+
+    for cid, agency in agencies_to_scrape:
+        website = agency["website"]
+        company = agency.get("company_name", "Unknown")
+
+        try:
+            recruiters = await scrape_agency_for_recruiters(website)
+
+            for person in recruiters:
+                name = person.get("contact_name", "")
+                email = person.get("email")
+
+                if not name:
+                    continue
+
+                # Skip if we already have this person
+                already_exists = any(
+                    c.get("contact_name") == name and c.get("company_name") == company
+                    for c in _contacts.values()
+                )
+                if already_exists:
+                    continue
+
+                new_id = str(uuid.uuid4())
+                _contacts[new_id] = {
+                    "id": new_id,
+                    "company_name": company,
+                    "contact_name": name,
+                    "email": email,
+                    "phone": None,
+                    "website": website,
+                    "location": agency.get("location", "Australia"),
+                    "industry": agency.get("industry", "general"),
+                    "role_type": "recruiter",
+                    "source": person.get("source", "team_page_scrape"),
+                    "status": "not_started",
+                    "unsubscribed": False,
+                    "send_count": 0,
+                    "date_contacted": None,
+                    "notes": f"Guessed emails: {', '.join(person.get('guessed_emails', [])[:3])}" if person.get("guessed_emails") else None,
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                }
+                total_recruiters += 1
+
+            # Mark this agency as scraped
+            _contacts[cid]["_recruiters_scraped"] = True
+            agencies_processed += 1
+
+            results.append({
+                "agency": company,
+                "website": website,
+                "recruiters_found": len(recruiters),
+            })
+
+        except Exception as e:
+            logger.warning("Failed to scrape %s: %s", website, e)
+            _contacts[cid]["_recruiters_scraped"] = True
+            results.append({"agency": company, "website": website, "error": str(e)})
+
+    return {
+        "agencies_processed": agencies_processed,
+        "total_recruiters_found": total_recruiters,
+        "results": results,
+    }
+
+
 # ── HTML Dashboard ───────────────────────────────────────────────
 
 def _login_html(error: str = "") -> str:
@@ -1151,6 +1248,7 @@ tr:hover{{background:#111118}}
 <button class="btn" style="background:#1e3a5f;color:#60a5fa;" onclick="seedAgencies()">&#127968; Seed AU Agencies</button>
 <button class="btn" style="background:#1a3a2a;color:#4ade80;" onclick="enrichEmails()">&#9993; Enrich Emails</button>
 <button class="btn" style="background:#3a2a1a;color:#fb923c;" onclick="scrapeGoogle()">&#128269; Scrape Google</button>
+<button class="btn" style="background:#2a1a3a;color:#c084fc;" onclick="scrapeRecruiters()">&#128100; Scrape Recruiters</button>
 <span id="enrich-status" style="font-size:12px;color:#64748b;align-self:center;"></span>
 </div>
 
