@@ -24,6 +24,7 @@ import csv
 import hashlib
 import hmac as hmac_mod
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
@@ -38,6 +39,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from pydantic import BaseModel
 
 from app.config import get_settings
+from app.services.recruiter_scraper import scrape_website_for_emails, scrape_rcsa_directory, google_search_agencies
 
 logger = logging.getLogger(__name__)
 
@@ -814,6 +816,207 @@ You won&rsquo;t receive any more emails from HireIQ. If this was a mistake, cont
 </div></body></html>""")
 
 
+# ── Enrichment & Scraping ────────────────────────────────────────
+
+@router.post("/api/enrich/{contact_id}")
+async def enrich_contact(
+    contact_id: str,
+    hiq_outreach: str | None = Cookie(None),
+):
+    """Scrape a contact's website for email addresses."""
+    if not _verify(hiq_outreach):
+        return JSONResponse({"error": "Unauthorized"}, 401)
+
+    contact = _contacts.get(contact_id)
+    if not contact:
+        return JSONResponse({"error": "Not found"}, 404)
+
+    if not contact.get("website"):
+        return JSONResponse({"error": "No website URL on this contact"}, 400)
+
+    result = await scrape_website_for_emails(contact["website"])
+
+    had_email = bool(contact.get("email"))
+    if result["emails"] and not had_email:
+        contact["email"] = result["emails"][0]
+        contact["source"] = contact.get("source") or "enriched"
+
+    return {
+        "contact_id": contact_id,
+        "website": contact["website"],
+        "emails_found": result["emails"],
+        "pages_checked": result["pages_checked"],
+        "auto_set": result["emails"][0] if result["emails"] and not had_email else None,
+    }
+
+
+@router.post("/api/enrich-batch")
+async def enrich_batch(
+    limit: int = Query(20),
+    hiq_outreach: str | None = Cookie(None),
+):
+    """Scrape websites for contacts that have a website but no email."""
+    if not _verify(hiq_outreach):
+        return JSONResponse({"error": "Unauthorized"}, 401)
+
+    candidates = [
+        c for c in _contacts.values()
+        if c.get("website")
+        and not c.get("email")
+        and not c.get("unsubscribed")
+        and c.get("enrich_status") not in ("enriched_no_email", "enrich_error")
+    ]
+    candidates = candidates[:limit]
+
+    results = []
+    for contact in candidates:
+        try:
+            result = await scrape_website_for_emails(contact["website"])
+            if result["emails"]:
+                contact["email"] = result["emails"][0]
+                contact["enrich_status"] = "enriched"
+                results.append({
+                    "company": contact.get("company_name"),
+                    "website": contact["website"],
+                    "email": result["emails"][0],
+                    "all_emails": result["emails"],
+                })
+            else:
+                contact["enrich_status"] = "enriched_no_email"
+                results.append({
+                    "company": contact.get("company_name"),
+                    "website": contact["website"],
+                    "email": None,
+                    "all_emails": [],
+                })
+        except Exception as e:
+            contact["enrich_status"] = "enrich_error"
+            results.append({
+                "company": contact.get("company_name"),
+                "website": contact["website"],
+                "email": None,
+                "error": str(e),
+            })
+
+    enriched = sum(1 for r in results if r.get("email"))
+    return {"processed": len(results), "enriched": enriched, "results": results}
+
+
+@router.post("/api/scrape-directory")
+async def scrape_directory(
+    source: str = Query("google"),
+    query: str = Query("recruitment agency Australia"),
+    hiq_outreach: str | None = Cookie(None),
+):
+    """Scrape a directory for new agency contacts."""
+    if not _verify(hiq_outreach):
+        return JSONResponse({"error": "Unauthorized"}, 401)
+
+    if source == "rcsa":
+        agencies = await scrape_rcsa_directory()
+    else:
+        agencies = await google_search_agencies(query)
+
+    created = 0
+    skipped = 0
+    for agency in agencies:
+        website = agency.get("website", "")
+        email = agency.get("email", "")
+
+        # Deduplicate by website or email
+        already_exists = any(
+            (website and c.get("website") == website) or
+            (email and c.get("email") == email)
+            for c in _contacts.values()
+        )
+        if already_exists:
+            skipped += 1
+            continue
+
+        cid = str(uuid.uuid4())
+        _contacts[cid] = {
+            "id": cid,
+            "company_name": agency.get("company_name"),
+            "contact_name": None,
+            "email": email or None,
+            "phone": None,
+            "website": website or None,
+            "location": agency.get("location", "Australia"),
+            "industry": agency.get("industry", "general"),
+            "role_type": "agency_director",
+            "source": agency.get("source", source),
+            "status": "not_started",
+            "unsubscribed": False,
+            "send_count": 0,
+            "date_contacted": None,
+            "notes": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        created += 1
+
+    return {"source": source, "found": len(agencies), "created": created, "skipped": skipped}
+
+
+@router.post("/api/seed")
+async def seed_from_csv(
+    hiq_outreach: str | None = Cookie(None),
+):
+    """Load the built-in AU agencies CSV as starter contacts."""
+    if not _verify(hiq_outreach):
+        return JSONResponse({"error": "Unauthorized"}, 401)
+
+    csv_path = os.path.join(os.path.dirname(__file__), "..", "data", "au_agencies.csv")
+    csv_path = os.path.normpath(csv_path)
+
+    if not os.path.exists(csv_path):
+        return JSONResponse({"error": f"Seed CSV not found at {csv_path}"}, 404)
+
+    with open(csv_path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        rows = list(reader)
+
+    created = 0
+    skipped = 0
+    for row in rows:
+        website = (row.get("website") or "").strip()
+        company = (row.get("company_name") or "").strip()
+
+        if not company and not website:
+            continue
+
+        # Deduplicate by website
+        already_exists = any(
+            website and c.get("website") == website
+            for c in _contacts.values()
+        )
+        if already_exists:
+            skipped += 1
+            continue
+
+        cid = str(uuid.uuid4())
+        _contacts[cid] = {
+            "id": cid,
+            "company_name": company or None,
+            "contact_name": None,
+            "email": None,
+            "phone": None,
+            "website": website or None,
+            "location": (row.get("location") or "").strip() or "Australia",
+            "industry": (row.get("industry") or "").strip() or "general",
+            "role_type": (row.get("role_type") or "").strip() or "agency_director",
+            "source": "au_agencies_csv",
+            "status": "not_started",
+            "unsubscribed": False,
+            "send_count": 0,
+            "date_contacted": None,
+            "notes": None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        created += 1
+
+    return {"total_in_csv": len(rows), "created": created, "skipped": skipped}
+
+
 # ── HTML Dashboard ───────────────────────────────────────────────
 
 def _login_html(error: str = "") -> str:
@@ -900,6 +1103,7 @@ tr:hover{{background:#111118}}
 .badge-bounced{{background:#f59e0b20;color:#fbbf24}}.badge-failed{{background:#ef444420;color:#f87171}}
 .badge-responded{{background:#8b5cf620;color:#a78bfa}}.badge-unsubscribed{{background:#64748b20;color:#94a3b8}}
 .badge-not_started{{background:#2a2a40;color:#94a3b8}}
+.enrich-none{{color:#ef4444;font-size:11px;font-style:italic}}.enrich-ok{{color:#4ade80;font-size:11px}}
 .panel{{display:none}}.panel.active{{display:block}}
 .card{{background:#111118;border-radius:12px;padding:20px;margin-bottom:16px;border:1px solid #1e1e30}}
 .form-row{{display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap}}
@@ -943,10 +1147,16 @@ tr:hover{{background:#111118}}
 <label class="btn btn-primary" style="cursor:pointer;">Import CSV<input type="file" accept=".csv" onchange="importCSV(this)" style="display:none"></label>
 <button class="btn btn-success" onclick="sendBatch()">Send Batch</button>
 </div>
+<div class="toolbar" style="margin-top:-4px;">
+<button class="btn" style="background:#1e3a5f;color:#60a5fa;" onclick="seedAgencies()">&#127968; Seed AU Agencies</button>
+<button class="btn" style="background:#1a3a2a;color:#4ade80;" onclick="enrichEmails()">&#9993; Enrich Emails</button>
+<button class="btn" style="background:#3a2a1a;color:#fb923c;" onclick="scrapeGoogle()">&#128269; Scrape Google</button>
+<span id="enrich-status" style="font-size:12px;color:#64748b;align-self:center;"></span>
+</div>
 
 <div id="contacts-table" style="overflow-x:auto;">
 <table>
-<thead><tr><th>Name</th><th>Company</th><th>Email</th><th>Location</th><th>Industry</th><th>Role</th><th>Status</th><th>Sends</th><th>Last Contacted</th><th>Actions</th></tr></thead>
+<thead><tr><th>Name</th><th>Company</th><th>Email</th><th>Website</th><th>Location</th><th>Industry</th><th>Status</th><th>Sends</th><th>Last Contacted</th><th>Actions</th></tr></thead>
 <tbody id="contacts-body"></tbody>
 </table>
 </div>
@@ -1016,15 +1226,15 @@ async function loadContacts(){{
   tbody.innerHTML=data.contacts.map(c=>`<tr>
     <td>${{c.contact_name||'\u2014'}}</td>
     <td>${{c.company_name||'\u2014'}}</td>
-    <td style="font-size:12px">${{c.email||'\u2014'}}</td>
+    <td style="font-size:12px">${{c.email?`<span style="color:#4ade80">${{c.email}}</span>`:'<span style="color:#64748b;font-style:italic">no email</span>'}}</td>
+    <td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${{c.website?`<a href="${{c.website}}" target="_blank" style="color:#7c5cff;text-decoration:none">${{c.website.replace(/^https?:\/\/(www\.)?/,'')}}</a>`:'\u2014'}}</td>
     <td>${{c.location||'\u2014'}}</td>
     <td>${{c.industry||'\u2014'}}</td>
-    <td style="font-size:12px">${{c.role_type||'\u2014'}}</td>
     <td><span class="badge badge-${{c.status}}">${{c.status}}</span></td>
     <td>${{c.send_count}}</td>
     <td style="font-size:11px;color:#64748b">${{c.date_contacted?new Date(c.date_contacted).toLocaleDateString():'\u2014'}}</td>
     <td style="white-space:nowrap">
-      <button class="btn btn-sm btn-primary" onclick="sendTo('${{c.id}}',false)">Send</button>
+      ${{c.email?`<button class="btn btn-sm btn-primary" onclick="sendTo('${{c.id}}',false)">Send</button>`:`<button class="btn btn-sm" style="background:#1a3a2a;color:#4ade80" onclick="enrichOne('${{c.id}}')">Enrich</button>`}}
       <button class="btn btn-sm" style="background:#2a2a40;color:#94a3b8" onclick="sendTo('${{c.id}}',true)">Test</button>
       <button class="btn btn-sm" style="background:#2a2a40;color:#94a3b8" onclick="editContact('${{c.id}}')">Edit</button>
       <button class="btn btn-sm btn-danger" onclick="deleteContact('${{c.id}}')">Del</button>
@@ -1129,6 +1339,54 @@ async function loadStats(){{
   }});
   html+='</tbody></table></div>';
   document.getElementById('stats-content').innerHTML=html;
+}}
+
+async function seedAgencies(){{
+  if(!confirm('Load built-in AU agencies CSV? This adds ~150 Australian recruitment agencies as contacts.'))return;
+  const status=document.getElementById('enrich-status');
+  status.textContent='Seeding...';
+  const r=await api('/seed',{{method:'POST'}});
+  if(r.error){{toast('Error: '+r.error,false);status.textContent='';return;}}
+  toast('Seeded: '+r.created+' new agencies ('+r.skipped+' already existed)',true);
+  status.textContent='Seeded '+r.created+' agencies';
+  loadContacts();
+}}
+
+async function enrichEmails(){{
+  if(!confirm('Scrape websites for contacts missing emails? (up to 20 contacts, may take a while)'))return;
+  const status=document.getElementById('enrich-status');
+  status.textContent='Enriching...';
+  const r=await api('/enrich-batch?limit=20',{{method:'POST'}});
+  if(r.error){{toast('Error: '+r.error,false);status.textContent='';return;}}
+  toast('Enriched: '+r.enriched+' emails found out of '+r.processed+' contacts',true);
+  status.textContent='Found '+r.enriched+'/'+r.processed+' emails';
+  loadContacts();
+}}
+
+async function scrapeGoogle(){{
+  const q=prompt('Search query:','recruitment agency Australia');
+  if(!q)return;
+  const status=document.getElementById('enrich-status');
+  status.textContent='Scraping...';
+  const r=await api('/scrape-directory?source=google&query='+encodeURIComponent(q),{{method:'POST'}});
+  if(r.error){{toast('Error: '+r.error,false);status.textContent='';return;}}
+  toast('Scraped: '+r.created+' new agencies found ('+r.skipped+' duplicates)',true);
+  status.textContent='Imported '+r.created+' new agencies';
+  loadContacts();
+}}
+
+async function enrichOne(id){{
+  const status=document.getElementById('enrich-status');
+  status.textContent='Enriching 1 contact...';
+  const r=await api('/enrich/'+id,{{method:'POST'}});
+  if(r.error){{toast('Error: '+r.error,false);status.textContent='';return;}}
+  if(r.emails_found&&r.emails_found.length){{
+    toast('Found: '+r.emails_found[0]+(r.auto_set?' (auto-set)':''),true);
+  }}else{{
+    toast('No emails found on '+r.website,false);
+  }}
+  status.textContent='';
+  loadContacts();
 }}
 
 // Initial load
