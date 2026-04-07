@@ -707,6 +707,9 @@ async def get_stats(
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
 
+    from app.routers.auth import _users as hireiq_users
+    from app.services.usage import _usage as hireiq_usage
+
     # Status counts
     status_counts: dict[str, int] = {}
     for c in _contacts.values():
@@ -716,14 +719,54 @@ async def get_stats(
 
     # Engagement (last 30 days)
     thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-    opens = sum(
-        1 for cl in _clicks
-        if cl.get("url") == "__open__" and cl.get("created_at", "") >= thirty_days_ago
-    )
-    clicks = sum(
-        1 for cl in _clicks
-        if cl.get("url") != "__open__" and cl.get("created_at", "") >= thirty_days_ago
-    )
+
+    # Build per-email engagement lookup
+    opened_emails = set()
+    clicked_emails = set()
+    for cl in _clicks:
+        email = cl.get("email", "")
+        if not email:
+            continue
+        if cl.get("url") == "__open__":
+            opened_emails.add(email.lower())
+        else:
+            clicked_emails.add(email.lower())
+
+    opens = sum(1 for cl in _clicks if cl.get("url") == "__open__" and cl.get("created_at", "") >= thirty_days_ago)
+    clicks = sum(1 for cl in _clicks if cl.get("url") != "__open__" and cl.get("created_at", "") >= thirty_days_ago)
+
+    # Cross-reference with HireIQ signups and usage
+    signed_up_emails = set(e.lower() for e in hireiq_users.keys())
+    used_analysis_emails = set()
+    for identifier, data in hireiq_usage.items():
+        if not identifier.startswith("ip:") and data.get("count", 0) > 0:
+            used_analysis_emails.add(identifier.lower())
+
+    # Funnel counts (from outreach contacts only)
+    all_contact_emails = set(c.get("email", "").lower() for c in _contacts.values() if c.get("email"))
+    sent_emails = set(c.get("email", "").lower() for c in _contacts.values() if c.get("status") in ("sent", "delivered") and c.get("email"))
+
+    funnel = {
+        "total_contacts": total,
+        "with_email": len(all_contact_emails),
+        "sent": len(sent_emails),
+        "opened": len(opened_emails & all_contact_emails),
+        "clicked": len(clicked_emails & all_contact_emails),
+        "signed_up": len(signed_up_emails & all_contact_emails),
+        "used_analysis": len(used_analysis_emails & all_contact_emails),
+    }
+
+    # Per-contact engagement for the contacts table
+    contact_engagement: dict[str, dict] = {}
+    for c in _contacts.values():
+        email = (c.get("email") or "").lower()
+        if email:
+            contact_engagement[email] = {
+                "opened": email in opened_emails,
+                "clicked": email in clicked_emails,
+                "signed_up": email in signed_up_emails,
+                "used_analysis": email in used_analysis_emails,
+            }
 
     # Recent sends
     recent = sorted(_send_log, key=lambda s: s.get("created_at", ""), reverse=True)[:20]
@@ -732,6 +775,8 @@ async def get_stats(
         "total": total,
         "status_counts": status_counts,
         "engagement": {"opens": opens, "clicks": clicks},
+        "funnel": funnel,
+        "contact_engagement": contact_engagement,
         "recent_sends": [
             {
                 "email": s.get("email"),
@@ -1254,7 +1299,7 @@ tr:hover{{background:#111118}}
 
 <div id="contacts-table" style="overflow-x:auto;">
 <table>
-<thead><tr><th>Name</th><th>Company</th><th>Email</th><th>Website</th><th>Location</th><th>Industry</th><th>Status</th><th>Sends</th><th>Last Contacted</th><th>Actions</th></tr></thead>
+<thead><tr><th>Name</th><th>Company</th><th>Email</th><th style="text-align:center">Opened</th><th style="text-align:center">Clicked</th><th style="text-align:center">Signed Up</th><th style="text-align:center">Analysed</th><th>Status</th><th>Sends</th><th>Actions</th></tr></thead>
 <tbody id="contacts-body"></tbody>
 </table>
 </div>
@@ -1311,6 +1356,8 @@ async function api(path,opts={{}}){{
   return r.json();
 }}
 
+let _contactEngagement={{}};
+
 async function loadContacts(){{
   const industry=document.getElementById('f-industry').value;
   const status=document.getElementById('f-status').value;
@@ -1320,24 +1367,31 @@ async function loadContacts(){{
   if(status)qs+='&status='+status;
   if(search)qs+='&search='+encodeURIComponent(search);
   const data=await api('/contacts'+qs);
+  // Fetch engagement data
+  const stats=await api('/stats');
+  _contactEngagement=stats.contact_engagement||{{}};
   const tbody=document.getElementById('contacts-body');
-  tbody.innerHTML=data.contacts.map(c=>`<tr>
+  tbody.innerHTML=data.contacts.map(c=>{{
+    const email=(c.email||'').toLowerCase();
+    const eng=_contactEngagement[email]||{{}};
+    const dot=(on,color)=>on?`<span style="color:${{color}};font-size:14px;" title="${{on?'Yes':'No'}}">&#9679;</span>`:`<span style="color:#333;font-size:14px;">&#9675;</span>`;
+    return `<tr>
     <td>${{c.contact_name||'\u2014'}}</td>
     <td>${{c.company_name||'\u2014'}}</td>
     <td style="font-size:12px">${{c.email?`<span style="color:#4ade80">${{c.email}}</span>`:'<span style="color:#64748b;font-style:italic">no email</span>'}}</td>
-    <td style="font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${{c.website?`<a href="${{c.website}}" target="_blank" style="color:#7c5cff;text-decoration:none">${{c.website.replace(/^https?:\/\/(www\.)?/,'')}}</a>`:'\u2014'}}</td>
-    <td>${{c.location||'\u2014'}}</td>
-    <td>${{c.industry||'\u2014'}}</td>
+    <td style="text-align:center">${{dot(eng.opened,'#22c55e')}}</td>
+    <td style="text-align:center">${{dot(eng.clicked,'#3b82f6')}}</td>
+    <td style="text-align:center">${{dot(eng.signed_up,'#a78bfa')}}</td>
+    <td style="text-align:center">${{dot(eng.used_analysis,'#f59e0b')}}</td>
     <td><span class="badge badge-${{c.status}}">${{c.status}}</span></td>
     <td>${{c.send_count}}</td>
-    <td style="font-size:11px;color:#64748b">${{c.date_contacted?new Date(c.date_contacted).toLocaleDateString():'\u2014'}}</td>
     <td style="white-space:nowrap">
       ${{c.email?`<button class="btn btn-sm btn-primary" onclick="sendTo('${{c.id}}',false)">Send</button>`:`<button class="btn btn-sm" style="background:#1a3a2a;color:#4ade80" onclick="enrichOne('${{c.id}}')">Enrich</button>`}}
-      <button class="btn btn-sm" style="background:#2a2a40;color:#94a3b8" onclick="sendTo('${{c.id}}',true)">Test</button>
       <button class="btn btn-sm" style="background:#2a2a40;color:#94a3b8" onclick="editContact('${{c.id}}')">Edit</button>
       <button class="btn btn-sm btn-danger" onclick="deleteContact('${{c.id}}')">Del</button>
     </td>
-  </tr>`).join('');
+  </tr>`;
+  }}).join('');
 }}
 
 function debounceSearch(){{clearTimeout(searchTimer);searchTimer=setTimeout(loadContacts,300)}}
@@ -1425,12 +1479,43 @@ async function importCSV(input){{
 
 async function loadStats(){{
   const s=await api('/stats');
-  const sc=s.status_counts||{{}};
   const eng=s.engagement||{{}};
-  let html='<div class="kpis" style="margin-bottom:24px;">';
+  const f=s.funnel||{{}};
+  let html='';
+
+  // Funnel
+  html+='<div class="card" style="margin-bottom:20px;"><h3 style="margin-bottom:16px;color:#e2e8f0;">Conversion Funnel</h3>';
+  const steps=[
+    {{label:'Total Contacts',value:f.total_contacts||0,color:'#64748b'}},
+    {{label:'Have Email',value:f.with_email||0,color:'#94a3b8'}},
+    {{label:'Email Sent',value:f.sent||0,color:'#60a5fa'}},
+    {{label:'Opened',value:f.opened||0,color:'#22c55e'}},
+    {{label:'Clicked',value:f.clicked||0,color:'#3b82f6'}},
+    {{label:'Signed Up',value:f.signed_up||0,color:'#a78bfa'}},
+    {{label:'Used Analysis',value:f.used_analysis||0,color:'#f59e0b'}},
+  ];
+  const maxVal=Math.max(1,...steps.map(s=>s.value));
+  steps.forEach(st=>{{
+    const pct=Math.round((st.value/maxVal)*100);
+    html+=`<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
+      <span style="width:110px;font-size:12px;color:#94a3b8;text-align:right">${{st.label}}</span>
+      <div style="flex:1;height:28px;background:#111118;border-radius:6px;overflow:hidden;position:relative;">
+        <div style="height:100%;width:${{pct}}%;background:${{st.color}};border-radius:6px;transition:width 0.5s;"></div>
+        <span style="position:absolute;right:8px;top:5px;font-size:12px;font-weight:600;color:#e2e8f0;">${{st.value}}</span>
+      </div>
+    </div>`;
+  }});
+  html+='</div>';
+
+  // KPI cards
+  html+='<div class="kpis" style="margin-bottom:24px;">';
   html+='<div style="background:#111118;border-radius:12px;padding:16px 20px;border:1px solid #1e1e30;"><p style="color:#64748b;font-size:11px;text-transform:uppercase;">Opens (30d)</p><p style="color:#22c55e;font-size:24px;font-weight:700;">'+eng.opens+'</p></div>';
   html+='<div style="background:#111118;border-radius:12px;padding:16px 20px;border:1px solid #1e1e30;"><p style="color:#64748b;font-size:11px;text-transform:uppercase;">Clicks (30d)</p><p style="color:#3b82f6;font-size:24px;font-weight:700;">'+eng.clicks+'</p></div>';
+  const signupRate=f.sent>0?Math.round((f.signed_up/f.sent)*100):0;
+  html+='<div style="background:#111118;border-radius:12px;padding:16px 20px;border:1px solid #1e1e30;"><p style="color:#64748b;font-size:11px;text-transform:uppercase;">Signup Rate</p><p style="color:#a78bfa;font-size:24px;font-weight:700;">'+signupRate+'%</p></div>';
   html+='</div>';
+
+  // Recent sends
   html+='<div class="card"><h3 style="margin-bottom:12px;">Recent Sends</h3><table><thead><tr><th>Email</th><th>Type</th><th>Status</th><th>Subject</th><th>Time</th></tr></thead><tbody>';
   (s.recent_sends||[]).forEach(r=>{{
     html+=`<tr><td style="font-size:12px">${{r.email}}</td><td>${{r.send_type}}</td><td><span class="badge badge-${{r.status}}">${{r.status}}</span></td><td style="font-size:12px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${{r.subject||''}}</td><td style="font-size:11px;color:#64748b">${{r.created_at?new Date(r.created_at).toLocaleString():''}}</td></tr>`;
