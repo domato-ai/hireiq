@@ -11,6 +11,7 @@ from app.models.candidate_document import CandidateDocument
 from app.models.candidate_score import CandidateScore
 from app.models.subscription import Subscription
 from app.models.usage_event import UsageEvent
+from app.models.outreach import OutreachContact, OutreachSendLog, OutreachClick
 
 __all__ = [
     "User",
@@ -21,4 +22,7 @@ __all__ = [
     "CandidateScore",
     "Subscription",
     "UsageEvent",
+    "OutreachContact",
+    "OutreachSendLog",
+    "OutreachClick",
 ]

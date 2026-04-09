@@ -11,7 +11,7 @@ from app.services.parser import extract_text
 from app.services.extraction import extract_resume_structured, extract_jd_requirements
 from app.services.embeddings import generate as generate_embedding
 from app.services.scoring import score_candidate
-from app.services.usage import check_quota, record_usage, LIMITS
+from app.services.usage import check_quota_async, record_usage_async, LIMITS
 from app.routers.auth import verify_token
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ class AnalysisResponse(BaseModel):
     usage: dict | None = None
 
 
-def _resolve_identity(request: Request, authorization: str | None) -> tuple[str, str]:
+async def _resolve_identity(request: Request, authorization: str | None) -> tuple[str, str]:
     """Determine user identity and plan from auth header or IP."""
     if authorization and authorization.startswith("Bearer "):
         token = authorization[7:]
@@ -64,11 +64,12 @@ def _resolve_identity(request: Request, authorization: str | None) -> tuple[str,
         if payload:
             email = payload.get("email", "")
             if email:
-                # Token is valid — use email as identity even if user isn't in memory
-                # (user store resets on container restart but token is still valid)
-                from app.routers.auth import _users
-                user = _users.get(email, {})
-                plan = user.get("plan", "free")  # Default to free if user not in memory
+                from app.routers.auth import get_user_by_email
+                from app.database import get_session_factory
+                factory = get_session_factory()
+                async with factory() as session:
+                    user = await get_user_by_email(session, email)
+                    plan = user.plan if user else "free"
                 return email, plan
     # Anonymous: use forwarded IP (Azure puts real IP in X-Forwarded-For)
     forwarded = request.headers.get("x-forwarded-for")
@@ -85,8 +86,8 @@ async def get_usage(
     authorization: str | None = Header(default=None),
 ):
     """Get current usage for the authenticated user or anonymous IP."""
-    identifier, plan = _resolve_identity(request, authorization)
-    return check_quota(identifier, plan)
+    identifier, plan = await _resolve_identity(request, authorization)
+    return await check_quota_async(identifier, plan)
 
 
 @router.post("", response_model=AnalysisResponse, status_code=200)
@@ -103,10 +104,10 @@ async def analyze(
     3. Return ranked candidates
     """
     # Resolve identity
-    identifier, plan = _resolve_identity(request, authorization)
+    identifier, plan = await _resolve_identity(request, authorization)
 
     # Check quota
-    quota = check_quota(identifier, plan)
+    quota = await check_quota_async(identifier, plan)
     if not quota["allowed"]:
         raise HTTPException(
             status_code=429,
@@ -216,11 +217,18 @@ async def analyze(
     logger.info("[%s] Analysis complete: %d candidates, %d skipped",
                 analysis_id, len(candidates), skipped)
 
-    # Record usage after successful processing
-    record_usage(identifier)
+    # Record usage after successful processing (non-blocking — don't fail the response)
+    try:
+        await record_usage_async(identifier)
+    except Exception as e:
+        logger.error("Usage recording failed (non-fatal): %s", e)
 
     # Return updated quota with response
-    updated_quota = check_quota(identifier, plan)
+    try:
+        updated_quota = await check_quota_async(identifier, plan)
+    except Exception as e:
+        logger.error("Quota check failed (non-fatal): %s", e)
+        updated_quota = None
 
     return AnalysisResponse(
         analysis_id=analysis_id,

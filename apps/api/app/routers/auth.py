@@ -1,4 +1,4 @@
-"""Simple email/password authentication with JWT tokens."""
+"""Email/password authentication with JWT tokens — DB-backed."""
 from __future__ import annotations
 import hashlib
 import hmac
@@ -6,18 +6,18 @@ import logging
 import time
 import json
 import base64
-from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.database import get_db
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-# ── In-memory user store (replace with DB later) ──
-_users: dict[str, dict] = {}  # email -> {email, name, password_hash, plan, created_at}
 
 
 class RegisterRequest(BaseModel):
@@ -82,8 +82,14 @@ def verify_token(token: str) -> dict | None:
         return None
 
 
+async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
+    """Look up a user by email."""
+    result = await db.execute(select(User).where(User.email == email))
+    return result.scalar_one_or_none()
+
+
 @router.post("/register", response_model=AuthResponse, status_code=201)
-async def register(body: RegisterRequest):
+async def register(body: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """Register a new user with email and password."""
     email = body.email.lower().strip()
 
@@ -93,38 +99,39 @@ async def register(body: RegisterRequest):
     if len(body.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
-    if email in _users:
+    existing = await get_user_by_email(db, email)
+    if existing:
         raise HTTPException(status_code=409, detail="An account with this email already exists")
 
     password_hash = _hash_password(body.password)
-    _users[email] = {
-        "email": email,
-        "name": body.name or email.split("@")[0],
-        "password_hash": password_hash,
-        "plan": "free",
-        "created_at": time.time(),
-    }
+    user = User(
+        email=email,
+        name=body.name or email.split("@")[0],
+        password_hash=password_hash,
+        plan="free",
+    )
+    db.add(user)
+    await db.flush()
 
     token = _create_token(email)
-    user = _users[email]
 
     logger.info("User registered: %s", email)
     return AuthResponse(
         access_token=token,
-        user=UserOut(email=user["email"], name=user["name"], plan=user["plan"]),
+        user=UserOut(email=user.email, name=user.name or "", plan=user.plan),
     )
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(body: LoginRequest):
+async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
     """Login with email and password."""
     email = body.email.lower().strip()
 
-    user = _users.get(email)
-    if not user:
+    user = await get_user_by_email(db, email)
+    if not user or not user.password_hash:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    if user["password_hash"] != _hash_password(body.password):
+    if user.password_hash != _hash_password(body.password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     token = _create_token(email)
@@ -132,12 +139,15 @@ async def login(body: LoginRequest):
     logger.info("User logged in: %s", email)
     return AuthResponse(
         access_token=token,
-        user=UserOut(email=user["email"], name=user["name"], plan=user["plan"]),
+        user=UserOut(email=user.email, name=user.name or "", plan=user.plan),
     )
 
 
 @router.get("/me", response_model=UserOut)
-async def me(authorization: str | None = Header(default=None)):
+async def me(
+    authorization: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+):
     """Get current user from Authorization header."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -147,8 +157,8 @@ async def me(authorization: str | None = Header(default=None)):
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-    user = _users.get(payload["email"])
+    user = await get_user_by_email(db, payload["email"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
 
-    return UserOut(email=user["email"], name=user["name"], plan=user["plan"])
+    return UserOut(email=user.email, name=user.name or "", plan=user.plan)

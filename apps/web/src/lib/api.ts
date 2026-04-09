@@ -244,13 +244,23 @@ export interface BillingStatus {
   rolesLimit: number;
 }
 
+export interface Pricing {
+  currency: string;
+  symbol: string;
+  pro_price: number;
+  pro_interval: string;
+}
+
 export const billingApi = {
   getStatus: () => apiFetch<BillingStatus>("/billing/status"),
 
-  createCheckoutSession: (planId: string) =>
+  getPricing: () => apiFetch<Pricing>("/billing/pricing"),
+
+  createCheckoutSession: (planId: string, currency?: string) =>
     apiFetch<{ url: string }>("/billing/checkout", {
       method: "POST",
       body: { planId },
+      headers: currency ? { "x-currency": currency } : undefined,
     }),
 
   createPortalSession: () =>

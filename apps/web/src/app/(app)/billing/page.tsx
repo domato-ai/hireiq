@@ -1,46 +1,92 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { billingApi, type BillingStatus, type Pricing } from "@/lib/api";
 
-export const metadata: Metadata = {
-  title: "Billing",
-};
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "https://ca-hireiq-api-dev.delightfulsea-504dfc83.australiaeast.azurecontainerapps.io";
 
-const PLANS = [
-  {
-    id: "starter",
-    name: "Starter",
-    price: "$49",
-    period: "/month",
-    description: "For small teams running occasional searches.",
-    limits: ["3 active roles", "50 candidates/month", "Email support"],
-    current: false,
-  },
-  {
-    id: "growth",
-    name: "Growth",
-    price: "$149",
-    period: "/month",
-    description: "For recruiting teams with regular hiring volume.",
-    limits: ["15 active roles", "500 candidates/month", "Priority support"],
-    current: true,
-  },
-  {
-    id: "enterprise",
-    name: "Enterprise",
-    price: "Custom",
-    period: "",
-    description: "For organizations with high volume or compliance needs.",
-    limits: [
-      "Unlimited roles",
-      "Custom candidate volume",
-      "SSO & audit logs",
-      "Dedicated CSM",
-    ],
-    current: false,
-  },
-] as const;
+function getPlans(pricing: Pricing | null) {
+  const symbol = pricing?.symbol || "A$";
+  const proPrice = pricing?.pro_price || 19;
+  return [
+    {
+      id: "starter",
+      backendPlan: "free",
+      name: "Starter",
+      price: "Free",
+      period: "",
+      description: "For small teams running occasional searches.",
+      limits: ["3 active roles", "10 candidates/month", "Email support"],
+    },
+    {
+      id: "growth",
+      backendPlan: "pro",
+      name: "Growth",
+      price: `${symbol}${proPrice}`,
+      period: "/month",
+      description: "For recruiting teams with regular hiring volume.",
+      limits: ["50 active roles", "500 candidates/month", "Priority support"],
+    },
+    {
+      id: "enterprise",
+      backendPlan: "team",
+      name: "Enterprise",
+      price: "Custom",
+      period: "",
+      description: "For organizations with high volume or compliance needs.",
+      limits: [
+        "Unlimited roles",
+        "Custom candidate volume",
+        "SSO & audit logs",
+        "Dedicated CSM",
+      ],
+    },
+  ] as const;
+}
 
 export default function BillingPage() {
+  const [status, setStatus] = useState<BillingStatus | null>(null);
+  const [pricing, setPricing] = useState<Pricing | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [upgrading, setUpgrading] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    Promise.all([
+      billingApi.getStatus().catch(() => null),
+      billingApi.getPricing().catch(() => null),
+    ]).then(([s, p]) => {
+      setStatus(s);
+      setPricing(p);
+    }).finally(() => setLoading(false));
+  }, []);
+
+  const currentPlanId = status?.plan || "starter";
+  const PLANS = getPlans(pricing);
+
+  const handleUpgrade = async (planId: string) => {
+    setUpgrading(planId);
+    setError("");
+    try {
+      const { url } = await billingApi.createCheckoutSession(planId, pricing?.currency);
+      window.location.href = url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start checkout");
+      setUpgrading(null);
+    }
+  };
+
+  const handleManageSubscription = async () => {
+    setError("");
+    try {
+      const { url } = await billingApi.createPortalSession();
+      window.location.href = url;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to open subscription management");
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto">
       {/* Header */}
@@ -54,14 +100,32 @@ export default function BillingPage() {
       </div>
 
       <div className="px-8 py-6 max-w-4xl space-y-8">
+        {error && (
+          <div className="px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
         {/* Current usage */}
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-ink">Usage this period</h2>
           <div className="grid grid-cols-3 gap-4">
             {[
-              { label: "Active roles", value: "4", limit: "15" },
-              { label: "Candidates processed", value: "87", limit: "500" },
-              { label: "Billing period resets", value: "Apr 1", limit: "" },
+              {
+                label: "Active roles",
+                value: loading ? "-" : String(status?.rolesActive ?? 0),
+                limit: loading ? "" : String(status?.rolesLimit ?? 3),
+              },
+              {
+                label: "Candidates processed",
+                value: loading ? "-" : String(status?.candidatesUsed ?? 0),
+                limit: loading ? "" : String(status?.candidatesLimit ?? 10),
+              },
+              {
+                label: "Current plan",
+                value: loading ? "-" : PLANS.find(p => p.id === currentPlanId)?.name ?? "Starter",
+                limit: "",
+              },
             ].map((stat) => (
               <div
                 key={stat.label}
@@ -86,108 +150,97 @@ export default function BillingPage() {
         <section className="space-y-3">
           <h2 className="text-sm font-semibold text-ink">Plans</h2>
           <div className="grid grid-cols-3 gap-4">
-            {PLANS.map((plan) => (
-              <div
-                key={plan.id}
-                className={`
-                  rounded-lg border px-5 py-5 space-y-4 relative
-                  ${
-                    plan.current
-                      ? "border-ink bg-bone-50 shadow-card"
-                      : "border-ink/10 bg-bone-50"
-                  }
-                `}
-              >
-                {plan.current && (
-                  <span className="absolute top-4 right-4 text-2xs font-semibold uppercase tracking-wider text-ink bg-bone-200 px-2 py-0.5 rounded">
-                    Current
-                  </span>
-                )}
-                <div>
-                  <h3 className="text-sm font-semibold text-ink">
-                    {plan.name}
-                  </h3>
-                  <div className="flex items-baseline gap-0.5 mt-1">
-                    <span className="text-2xl font-semibold text-ink">
-                      {plan.price}
-                    </span>
-                    <span className="text-sm text-ink-400">{plan.period}</span>
-                  </div>
-                  <p className="text-xs text-ink-400 mt-1.5">
-                    {plan.description}
-                  </p>
-                </div>
-
-                <ul className="space-y-1.5">
-                  {plan.limits.map((limit) => (
-                    <li key={limit} className="flex items-start gap-2 text-xs">
-                      <CheckIcon />
-                      <span className="text-ink-600">{limit}</span>
-                    </li>
-                  ))}
-                </ul>
-
-                <Button
-                  size="sm"
-                  variant={plan.current ? "secondary" : "primary"}
-                  className="w-full"
-                  disabled={plan.current}
+            {PLANS.map((plan) => {
+              const isCurrent = plan.id === currentPlanId;
+              return (
+                <div
+                  key={plan.id}
+                  className={`
+                    rounded-lg border px-5 py-5 space-y-4 relative
+                    ${
+                      isCurrent
+                        ? "border-ink bg-bone-50 shadow-card"
+                        : "border-ink/10 bg-bone-50"
+                    }
+                  `}
                 >
-                  {plan.current
-                    ? "Current plan"
-                    : plan.id === "enterprise"
-                    ? "Contact sales"
-                    : "Upgrade"}
-                </Button>
-              </div>
-            ))}
+                  {isCurrent && (
+                    <span className="absolute top-4 right-4 text-2xs font-semibold uppercase tracking-wider text-ink bg-bone-200 px-2 py-0.5 rounded">
+                      Current
+                    </span>
+                  )}
+                  <div>
+                    <h3 className="text-sm font-semibold text-ink">
+                      {plan.name}
+                    </h3>
+                    <div className="flex items-baseline gap-0.5 mt-1">
+                      <span className="text-2xl font-semibold text-ink">
+                        {plan.price}
+                      </span>
+                      <span className="text-sm text-ink-400">{plan.period}</span>
+                    </div>
+                    <p className="text-xs text-ink-400 mt-1.5">
+                      {plan.description}
+                    </p>
+                  </div>
+
+                  <ul className="space-y-1.5">
+                    {plan.limits.map((limit) => (
+                      <li key={limit} className="flex items-start gap-2 text-xs">
+                        <CheckIcon />
+                        <span className="text-ink-600">{limit}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <Button
+                    size="sm"
+                    variant={isCurrent ? "secondary" : "primary"}
+                    className="w-full"
+                    disabled={isCurrent || upgrading === plan.id}
+                    onClick={() => {
+                      if (plan.id === "enterprise") {
+                        window.location.href = "mailto:support@domato.ai?subject=HireIQ Enterprise inquiry";
+                      } else if (!isCurrent) {
+                        handleUpgrade(plan.id);
+                      }
+                    }}
+                  >
+                    {upgrading === plan.id
+                      ? "Redirecting..."
+                      : isCurrent
+                      ? "Current plan"
+                      : plan.id === "enterprise"
+                      ? "Contact sales"
+                      : "Upgrade"}
+                  </Button>
+                </div>
+              );
+            })}
           </div>
         </section>
 
-        {/* Payment method */}
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-ink">Payment method</h2>
-          <div className="bg-bone-50 border border-ink/8 rounded-md px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-6 bg-ink-800 rounded flex items-center justify-center text-2xs text-bone font-mono">
-                VISA
-              </div>
+        {/* Manage subscription (only for paid plans) */}
+        {currentPlanId !== "starter" && (
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold text-ink">Subscription</h2>
+            <div className="bg-bone-50 border border-ink/8 rounded-md px-4 py-3 flex items-center justify-between">
               <div>
-                <p className="text-sm text-ink">•••• •••• •••• 4242</p>
-                <p className="text-xs text-ink-400">Expires 08 / 2026</p>
+                <p className="text-sm text-ink">
+                  Manage your payment method, invoices, and subscription
+                </p>
+                {status?.currentPeriodEnd && (
+                  <p className="text-xs text-ink-400 mt-0.5">
+                    Current period ends {new Date(status.currentPeriodEnd).toLocaleDateString()}
+                  </p>
+                )}
               </div>
+              <Button size="sm" variant="secondary" onClick={handleManageSubscription}>
+                Manage in Stripe
+              </Button>
             </div>
-            <button className="text-xs text-ink underline underline-offset-2 hover:text-ink-600 transition-colors">
-              Update
-            </button>
-          </div>
-        </section>
-
-        {/* Invoice history */}
-        <section className="space-y-3">
-          <h2 className="text-sm font-semibold text-ink">Invoice history</h2>
-          <div className="bg-bone-50 border border-ink/8 rounded-md divide-y divide-ink/6">
-            {[
-              { date: "Mar 1, 2026", amount: "$149.00", status: "Paid" },
-              { date: "Feb 1, 2026", amount: "$149.00", status: "Paid" },
-              { date: "Jan 1, 2026", amount: "$149.00", status: "Paid" },
-            ].map((invoice) => (
-              <div
-                key={invoice.date}
-                className="px-4 py-3 flex items-center justify-between text-sm"
-              >
-                <span className="text-ink-600">{invoice.date}</span>
-                <span className="text-ink font-medium">{invoice.amount}</span>
-                <span className="text-signal-green text-xs font-medium">
-                  {invoice.status}
-                </span>
-                <button className="text-xs text-ink-400 hover:text-ink underline underline-offset-2 transition-colors">
-                  PDF
-                </button>
-              </div>
-            ))}
-          </div>
-        </section>
+          </section>
+        )}
       </div>
     </div>
   );

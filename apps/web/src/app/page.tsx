@@ -106,6 +106,12 @@ export default function HomePage() {
   const [limitModal, setLimitModal] = useState<{ plan: string; used: number; limit: number; hint: string } | null>(null);
 
   const [upgraded, setUpgraded] = useState(false);
+  const [pricing, setPricing] = useState<{ currency: string; symbol: string; pro_price: number } | null>(null);
+
+  useEffect(() => {
+    // Fetch geo-based pricing
+    fetch(`${API_URL}/api/v1/billing/pricing`).then(r => r.json()).then(setPricing).catch(() => {});
+  }, []);
 
   useEffect(() => {
     try {
@@ -187,7 +193,7 @@ export default function HomePage() {
     try {
       const res = await fetch(`${API_URL}/api/v1/billing/checkout`, {
         method: "POST",
-        headers: { "Authorization": `Bearer ${token}` },
+        headers: { "Authorization": `Bearer ${token}`, ...(pricing?.currency ? { "x-currency": pricing.currency } : {}) },
       });
       const data = await res.json();
       if (res.ok && data.url) {
@@ -456,6 +462,39 @@ export default function HomePage() {
             ? "Ranked by evidence strength. Click a card to see full analysis."
             : "Paste a job description, upload resumes, and get an evidence-backed shortlist in seconds."}
         </p>
+
+        {/* ── Demo video ── */}
+        {step === "idle" && (
+          <div
+            className="w-full max-w-[640px] mt-8 mb-2 rounded-2xl overflow-hidden home-stagger-2"
+            style={{
+              border: "1px solid var(--card-border)",
+              boxShadow: "0 4px 32px rgba(0,0,0,0.2), 0 0 80px rgba(124,92,255,0.06)",
+            }}
+          >
+            <div
+              className="px-4 py-2.5 flex items-center gap-2"
+              style={{ background: "var(--card-bg)", borderBottom: "1px solid var(--card-border)" }}
+            >
+              <div className="w-2 h-2 rounded-full" style={{ background: "#7c5cff" }} />
+              <span className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
+                See it in action
+              </span>
+              <span className="text-[11px] ml-auto" style={{ color: "var(--text-faint)" }}>
+                5 resumes ranked in 30 seconds
+              </span>
+            </div>
+            <video
+              className="w-full"
+              controls
+              preload="metadata"
+              poster="https://sthireiqdevaue.blob.core.windows.net/videos/hireiq-demo-poster.jpg"
+              style={{ background: "#0a0a0a" }}
+            >
+              <source src="https://sthireiqdevaue.blob.core.windows.net/videos/hireiq-demo-5-resumes-web.mp4" type="video/mp4" />
+            </video>
+          </div>
+        )}
 
         {/* ── Upgrade success banner ── */}
         {upgraded && (
@@ -892,7 +931,7 @@ export default function HomePage() {
                     </div>
                     <div>
                       <p className="text-[14px] font-semibold" style={{ color: "var(--text-heading)" }}>HireIQ Pro</p>
-                      <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>A$19/month · Active</p>
+                      <p className="text-[11px]" style={{ color: "var(--text-muted)" }}>{pricing?.symbol || "A$"}{pricing?.pro_price || 19}/month · Active</p>
                     </div>
                   </div>
                   <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full"
@@ -976,7 +1015,7 @@ export default function HomePage() {
                   </div>
                   <p className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#a78bfa" }}>Pro</p>
                   <div className="flex items-baseline gap-1 mb-3">
-                    <span className="font-display text-2xl" style={{ color: "var(--text-heading)" }}>$19</span>
+                    <span className="font-display text-2xl" style={{ color: "var(--text-heading)" }}>{pricing?.symbol || "A$"}{pricing?.pro_price || 19}</span>
                     <span className="text-[12px]" style={{ color: "var(--text-faint)" }}>/month</span>
                   </div>
                   <div className="space-y-2 mb-4">
@@ -1136,7 +1175,7 @@ export default function HomePage() {
                   <span className="font-semibold" style={{ color: "var(--text-body)" }}>unlimited analyses</span>
                 </p>
                 <p className="text-[12px] mb-6" style={{ color: "var(--text-faint)" }}>
-                  $19/month · Cancel anytime
+                  {pricing?.symbol || "A$"}{pricing?.pro_price || 19}/month · Cancel anytime
                 </p>
                 <button
                   onClick={async () => {
@@ -1166,7 +1205,7 @@ export default function HomePage() {
                     boxShadow: "0 0 24px rgba(124,92,255,0.3), 0 2px 8px rgba(0,0,0,0.3)",
                   }}
                 >
-                  Upgrade to Pro — $19/mo
+                  Upgrade to Pro — {pricing?.symbol || "A$"}{pricing?.pro_price || 19}/mo
                 </button>
                 <p className="text-center text-[12px]" style={{ color: "var(--text-faint)" }}>
                   Your limit resets next month

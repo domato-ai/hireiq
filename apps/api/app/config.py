@@ -54,8 +54,9 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_publishable_key: str = ""
     stripe_webhook_secret: str = ""
-    stripe_price_id_pro: str = ""       # Pro plan price ID
-    stripe_price_id_team: str = ""      # Team plan price ID
+    stripe_price_id_pro: str = ""           # Pro plan price ID (AUD)
+    stripe_price_id_pro_usd: str = ""      # Pro plan price ID (USD)
+    stripe_price_id_team: str = ""         # Team plan price ID
 
     # ------------------------------------------------------------------ #
     # CORS

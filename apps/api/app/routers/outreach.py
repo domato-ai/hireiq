@@ -1,5 +1,6 @@
 """
 Outreach management — recruiter/HR contact CRUD, email campaigns, tracking.
+All data persisted to PostgreSQL via SQLAlchemy.
 
 Server-rendered HTML dashboard at /api/admin/outreach (cookie auth).
 
@@ -34,11 +35,15 @@ from urllib.parse import quote, unquote
 import smtplib
 
 from jose import jwt, JWTError
-from fastapi import APIRouter, Cookie, Query, Request, UploadFile, File
+from fastapi import APIRouter, Cookie, Depends, Query, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from pydantic import BaseModel
+from sqlalchemy import select, func, delete, and_, or_
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.database import get_db, get_session_factory
+from app.models.outreach import OutreachContact, OutreachSendLog, OutreachClick
 from app.services.recruiter_scraper import scrape_website_for_emails, scrape_rcsa_directory, google_search_agencies
 
 logger = logging.getLogger(__name__)
@@ -47,12 +52,6 @@ settings = get_settings()
 
 router = APIRouter(prefix="/api/admin/outreach", tags=["outreach"])
 tracking_router = APIRouter(tags=["outreach-tracking"])
-
-# ── In-memory storage ────────────────────────────────────────────
-_contacts: dict[str, dict] = {}        # id -> contact dict
-_send_log: list[dict] = []             # send history
-_clicks: list[dict] = []               # click/open tracking
-_config: dict[str, str] = {}           # key-value config
 
 # ── Constants ────────────────────────────────────────────────────
 _USER = "outreach manager"
@@ -183,8 +182,8 @@ def _build_email_html(contact: dict) -> str:
     h = hooks.get(industry, hooks["general"])
 
     signup_url = _tracked_url(f"{WEBSITE}?ref=outreach", email)
-    features_url = _tracked_url(WEBSITE, email)  # Single-page app — features are on the homepage
-    pricing_url = _tracked_url(WEBSITE, email)   # Pricing is inline on the homepage
+    features_url = _tracked_url(WEBSITE, email)
+    pricing_url = _tracked_url(WEBSITE, email)
     contact_url = _tracked_url(f"{WEBSITE}/contact", email)
     unsub_url = _unsubscribe_url(email)
 
@@ -387,27 +386,6 @@ class ContactUpdate(BaseModel):
     notes: str | None = None
 
 
-def _contact_dict(c: dict) -> dict:
-    return {
-        "id": c.get("id", ""),
-        "company_name": c.get("company_name"),
-        "contact_name": c.get("contact_name"),
-        "email": c.get("email"),
-        "phone": c.get("phone"),
-        "website": c.get("website"),
-        "location": c.get("location"),
-        "industry": c.get("industry"),
-        "role_type": c.get("role_type"),
-        "source": c.get("source"),
-        "status": c.get("status", "not_started"),
-        "unsubscribed": c.get("unsubscribed", False),
-        "send_count": c.get("send_count", 0),
-        "date_contacted": c.get("date_contacted"),
-        "notes": c.get("notes"),
-        "created_at": c.get("created_at"),
-    }
-
-
 @router.get("/api/contacts")
 async def list_contacts(
     status: str | None = None,
@@ -416,33 +394,41 @@ async def list_contacts(
     limit: int = 200,
     offset: int = 0,
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
 
-    contacts = list(_contacts.values())
+    query = select(OutreachContact)
 
-    # Filters
     if status:
-        contacts = [c for c in contacts if c.get("status") == status]
+        query = query.where(OutreachContact.status == status)
     if industry:
-        contacts = [c for c in contacts if industry.lower() in (c.get("industry") or "").lower()]
+        query = query.where(OutreachContact.industry.ilike(f"%{industry}%"))
     if search:
-        s = search.lower()
-        contacts = [c for c in contacts if (
-            s in (c.get("contact_name") or "").lower()
-            or s in (c.get("company_name") or "").lower()
-            or s in (c.get("email") or "").lower()
-            or s in (c.get("location") or "").lower()
-        )]
+        s = f"%{search}%"
+        query = query.where(
+            or_(
+                OutreachContact.contact_name.ilike(s),
+                OutreachContact.company_name.ilike(s),
+                OutreachContact.email.ilike(s),
+                OutreachContact.location.ilike(s),
+            )
+        )
 
-    # Sort by created_at desc
-    contacts.sort(key=lambda c: c.get("created_at", ""), reverse=True)
-    total = len(contacts)
-    contacts = contacts[offset:offset + limit]
+    # Count total
+    from sqlalchemy import text
+    count_query = select(func.count()).select_from(query.subquery())
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Fetch page
+    query = query.order_by(OutreachContact.created_at.desc()).offset(offset).limit(limit)
+    result = await db.execute(query)
+    contacts = result.scalars().all()
 
     return {
-        "contacts": [_contact_dict(c) for c in contacts],
+        "contacts": [c.to_dict() for c in contacts],
         "total": total,
     }
 
@@ -451,6 +437,7 @@ async def list_contacts(
 async def create_contact(
     body: ContactBody,
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
@@ -458,40 +445,34 @@ async def create_contact(
     email_lower = body.email.lower()
 
     # Check for existing by email
-    existing = None
-    for c in _contacts.values():
-        if c.get("email") == email_lower:
-            existing = c
-            break
+    result = await db.execute(
+        select(OutreachContact).where(OutreachContact.email == email_lower)
+    )
+    existing = result.scalar_one_or_none()
 
     if existing:
         for k, v in body.model_dump(exclude_none=True).items():
             if k == "email":
                 v = v.lower()
-            existing[k] = v
-        return {"contact": _contact_dict(existing), "action": "updated"}
+            setattr(existing, k, v)
+        await db.flush()
+        return {"contact": existing.to_dict(), "action": "updated"}
 
-    cid = str(uuid.uuid4())
-    contact = {
-        "id": cid,
-        "email": email_lower,
-        "company_name": body.company_name,
-        "contact_name": body.contact_name,
-        "phone": body.phone,
-        "website": body.website,
-        "location": body.location,
-        "industry": body.industry,
-        "role_type": body.role_type,
-        "source": body.source or "manual",
-        "status": "not_started",
-        "unsubscribed": False,
-        "send_count": 0,
-        "date_contacted": None,
-        "notes": body.notes,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    _contacts[cid] = contact
-    return {"contact": _contact_dict(contact), "action": "created"}
+    contact = OutreachContact(
+        email=email_lower,
+        company_name=body.company_name,
+        contact_name=body.contact_name,
+        phone=body.phone,
+        website=body.website,
+        location=body.location,
+        industry=body.industry,
+        role_type=body.role_type,
+        source=body.source or "manual",
+        notes=body.notes,
+    )
+    db.add(contact)
+    await db.flush()
+    return {"contact": contact.to_dict(), "action": "created"}
 
 
 @router.patch("/api/contacts/{contact_id}")
@@ -499,32 +480,42 @@ async def update_contact(
     contact_id: str,
     body: ContactUpdate,
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
 
-    contact = _contacts.get(contact_id)
+    result = await db.execute(
+        select(OutreachContact).where(OutreachContact.id == uuid.UUID(contact_id))
+    )
+    contact = result.scalar_one_or_none()
     if not contact:
         return JSONResponse({"error": "Not found"}, 404)
 
     for k, v in body.model_dump(exclude_none=True).items():
         if k == "email":
             v = v.lower()
-        contact[k] = v
-    return {"contact": _contact_dict(contact)}
+        setattr(contact, k, v)
+    await db.flush()
+    return {"contact": contact.to_dict()}
 
 
 @router.delete("/api/contacts/{contact_id}")
 async def delete_contact(
     contact_id: str,
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
 
-    if contact_id not in _contacts:
+    result = await db.execute(
+        select(OutreachContact).where(OutreachContact.id == uuid.UUID(contact_id))
+    )
+    contact = result.scalar_one_or_none()
+    if not contact:
         return JSONResponse({"error": "Not found"}, 404)
-    del _contacts[contact_id]
+    await db.delete(contact)
     return {"ok": True}
 
 
@@ -534,6 +525,7 @@ async def delete_contact(
 async def import_csv(
     file: UploadFile = File(...),
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
@@ -557,43 +549,37 @@ async def import_csv(
         # Find existing by email
         existing = None
         if email and "@" in email:
-            for c in _contacts.values():
-                if c.get("email") == email:
-                    existing = c
-                    break
+            result = await db.execute(
+                select(OutreachContact).where(OutreachContact.email == email)
+            )
+            existing = result.scalar_one_or_none()
 
         if existing:
             for field in ["company_name", "contact_name", "phone", "website", "location", "industry", "role_type", "notes"]:
                 val = (row.get(field) or "").strip()
                 if val:
-                    existing[field] = val
+                    setattr(existing, field, val)
             if email and "@" in email:
-                existing["email"] = email
-            existing["source"] = row.get("source", "").strip() or existing.get("source") or "csv_import"
+                existing.email = email
+            existing.source = row.get("source", "").strip() or existing.source or "csv_import"
             updated += 1
         else:
-            cid = str(uuid.uuid4())
-            contact = {
-                "id": cid,
-                "email": email if email and "@" in email else None,
-                "company_name": company or None,
-                "contact_name": contact_name_val or None,
-                "phone": (row.get("phone") or "").strip() or None,
-                "website": (row.get("website") or "").strip() or None,
-                "location": (row.get("location") or "").strip() or None,
-                "industry": (row.get("industry") or "").strip() or None,
-                "role_type": (row.get("role_type") or "").strip() or None,
-                "source": (row.get("source") or "").strip() or "csv_import",
-                "status": "not_started",
-                "unsubscribed": False,
-                "send_count": 0,
-                "date_contacted": None,
-                "notes": (row.get("notes") or "").strip() or None,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            }
-            _contacts[cid] = contact
+            contact = OutreachContact(
+                email=email if email and "@" in email else None,
+                company_name=company or None,
+                contact_name=contact_name_val or None,
+                phone=(row.get("phone") or "").strip() or None,
+                website=(row.get("website") or "").strip() or None,
+                location=(row.get("location") or "").strip() or None,
+                industry=(row.get("industry") or "").strip() or None,
+                role_type=(row.get("role_type") or "").strip() or None,
+                source=(row.get("source") or "").strip() or "csv_import",
+                notes=(row.get("notes") or "").strip() or None,
+            )
+            db.add(contact)
             created += 1
 
+    await db.flush()
     return {"created": created, "updated": updated, "errors": errors}
 
 
@@ -604,41 +590,46 @@ async def send_email(
     contact_id: str,
     test: bool = Query(False),
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
 
-    contact = _contacts.get(contact_id)
+    result = await db.execute(
+        select(OutreachContact).where(OutreachContact.id == uuid.UUID(contact_id))
+    )
+    contact = result.scalar_one_or_none()
     if not contact:
         return JSONResponse({"error": "Not found"}, 404)
 
-    if contact.get("unsubscribed"):
+    if contact.unsubscribed:
         return JSONResponse({"error": "Contact has unsubscribed"}, 400)
 
-    html = _build_email_html(contact)
-    cname = contact.get("contact_name") or "you"
+    contact_dict = contact.to_dict()
+    html = _build_email_html(contact_dict)
+    cname = contact.contact_name or "you"
     subject = f"Stop spending hours screening resumes — {cname}"
-    to_email = FROM_EMAIL if test else contact.get("email", "")
+    to_email = FROM_EMAIL if test else (contact.email or "")
 
-    result = _send_email_smtp(to_email, subject, html)
+    smtp_result = _send_email_smtp(to_email, subject, html)
 
-    _send_log.append({
-        "id": str(uuid.uuid4()),
-        "contact_id": contact_id,
-        "email": to_email,
-        "send_type": "test" if test else "manual",
-        "status": result["status"],
-        "subject": subject,
-        "notes": result.get("error") or None,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    log_entry = OutreachSendLog(
+        contact_id=contact.id,
+        email=to_email,
+        send_type="test" if test else "manual",
+        status=smtp_result["status"],
+        subject=subject,
+        notes=smtp_result.get("error") or None,
+    )
+    db.add(log_entry)
 
     if not test:
-        contact["status"] = result["status"]
-        contact["send_count"] = (contact.get("send_count") or 0) + 1
-        contact["date_contacted"] = datetime.now(timezone.utc).isoformat()
+        contact.status = smtp_result["status"]
+        contact.send_count = (contact.send_count or 0) + 1
+        contact.date_contacted = datetime.now(timezone.utc)
 
-    return {"ok": result["ok"], "status": result["status"], "error": result.get("error", "")}
+    await db.flush()
+    return {"ok": smtp_result["ok"], "status": smtp_result["status"], "error": smtp_result.get("error", "")}
 
 
 @router.post("/api/send-batch")
@@ -646,55 +637,62 @@ async def send_batch(
     new_limit: int = Query(5),
     followup_limit: int = Query(5),
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
 
     # New contacts (never sent)
-    all_contacts = list(_contacts.values())
-    new_contacts = [
-        c for c in all_contacts
-        if c.get("status") == "not_started" and not c.get("unsubscribed")
-    ]
-    new_contacts.sort(key=lambda c: c.get("created_at", ""))
-    new_contacts = new_contacts[:new_limit]
+    new_result = await db.execute(
+        select(OutreachContact).where(
+            and_(
+                OutreachContact.status == "not_started",
+                OutreachContact.unsubscribed == False,
+                OutreachContact.email.isnot(None),
+            )
+        ).order_by(OutreachContact.created_at).limit(new_limit)
+    )
+    new_contacts = list(new_result.scalars().all())
 
     # Follow-up contacts (sent 7+ days ago)
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-    followup_contacts = [
-        c for c in all_contacts
-        if c.get("status") in ("sent", "delivered")
-        and not c.get("unsubscribed")
-        and c.get("date_contacted")
-        and c["date_contacted"] < cutoff
-    ]
-    followup_contacts.sort(key=lambda c: c.get("date_contacted", ""))
-    followup_contacts = followup_contacts[:followup_limit]
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    followup_result = await db.execute(
+        select(OutreachContact).where(
+            and_(
+                OutreachContact.status.in_(["sent", "delivered"]),
+                OutreachContact.unsubscribed == False,
+                OutreachContact.date_contacted.isnot(None),
+                OutreachContact.date_contacted < cutoff,
+            )
+        ).order_by(OutreachContact.date_contacted).limit(followup_limit)
+    )
+    followup_contacts = list(followup_result.scalars().all())
 
     results = []
     for contact in new_contacts + followup_contacts:
-        html = _build_email_html(contact)
-        cname = contact.get("contact_name") or "you"
+        contact_dict = contact.to_dict()
+        html = _build_email_html(contact_dict)
+        cname = contact.contact_name or "you"
         subject = f"Stop spending hours screening resumes — {cname}"
-        email = contact.get("email", "")
-        result = _send_email_smtp(email, subject, html)
+        email = contact.email or ""
+        smtp_result = _send_email_smtp(email, subject, html)
 
-        _send_log.append({
-            "id": str(uuid.uuid4()),
-            "contact_id": contact["id"],
-            "email": email,
-            "send_type": "batch",
-            "status": result["status"],
-            "subject": subject,
-            "notes": result.get("error") or None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-        contact["status"] = result["status"]
-        contact["send_count"] = (contact.get("send_count") or 0) + 1
-        contact["date_contacted"] = datetime.now(timezone.utc).isoformat()
+        log_entry = OutreachSendLog(
+            contact_id=contact.id,
+            email=email,
+            send_type="batch",
+            status=smtp_result["status"],
+            subject=subject,
+            notes=smtp_result.get("error") or None,
+        )
+        db.add(log_entry)
+        contact.status = smtp_result["status"]
+        contact.send_count = (contact.send_count or 0) + 1
+        contact.date_contacted = datetime.now(timezone.utc)
 
-        results.append({"email": email, "status": result["status"]})
+        results.append({"email": email, "status": smtp_result["status"]})
 
+    await db.flush()
     return {"sent": len(results), "results": results}
 
 
@@ -703,48 +701,67 @@ async def send_batch(
 @router.get("/api/stats")
 async def get_stats(
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
 
-    from app.routers.auth import _users as hireiq_users
-    from app.services.usage import _usage as hireiq_usage
+    from app.models.user import User
 
     # Status counts
-    status_counts: dict[str, int] = {}
-    for c in _contacts.values():
-        s = c.get("status", "not_started")
-        status_counts[s] = status_counts.get(s, 0) + 1
+    status_result = await db.execute(
+        select(OutreachContact.status, func.count()).group_by(OutreachContact.status)
+    )
+    status_counts = dict(status_result.all())
     total = sum(status_counts.values())
 
     # Engagement (last 30 days)
-    thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
 
-    # Build per-email engagement lookup
-    opened_emails = set()
-    clicked_emails = set()
-    for cl in _clicks:
-        email = cl.get("email", "")
-        if not email:
-            continue
-        if cl.get("url") == "__open__":
-            opened_emails.add(email.lower())
-        else:
-            clicked_emails.add(email.lower())
+    # Build per-email engagement lookup from clicks table
+    opened_result = await db.execute(
+        select(OutreachClick.email).where(OutreachClick.url == "__open__").distinct()
+    )
+    opened_emails = set(r[0] for r in opened_result.all() if r[0])
 
-    opens = sum(1 for cl in _clicks if cl.get("url") == "__open__" and cl.get("created_at", "") >= thirty_days_ago)
-    clicks = sum(1 for cl in _clicks if cl.get("url") != "__open__" and cl.get("created_at", "") >= thirty_days_ago)
+    clicked_result = await db.execute(
+        select(OutreachClick.email).where(OutreachClick.url != "__open__").distinct()
+    )
+    clicked_emails = set(r[0] for r in clicked_result.all() if r[0])
 
-    # Cross-reference with HireIQ signups and usage
-    signed_up_emails = set(e.lower() for e in hireiq_users.keys())
-    used_analysis_emails = set()
-    for identifier, data in hireiq_usage.items():
-        if not identifier.startswith("ip:") and data.get("count", 0) > 0:
-            used_analysis_emails.add(identifier.lower())
+    opens_count = await db.execute(
+        select(func.count()).select_from(OutreachClick).where(
+            and_(OutreachClick.url == "__open__", OutreachClick.created_at >= thirty_days_ago)
+        )
+    )
+    opens = opens_count.scalar() or 0
 
-    # Funnel counts (from outreach contacts only)
-    all_contact_emails = set(c.get("email", "").lower() for c in _contacts.values() if c.get("email"))
-    sent_emails = set(c.get("email", "").lower() for c in _contacts.values() if c.get("status") in ("sent", "delivered") and c.get("email"))
+    clicks_count = await db.execute(
+        select(func.count()).select_from(OutreachClick).where(
+            and_(OutreachClick.url != "__open__", OutreachClick.created_at >= thirty_days_ago)
+        )
+    )
+    clicks = clicks_count.scalar() or 0
+
+    # Cross-reference with HireIQ signups
+    user_result = await db.execute(select(User.email))
+    signed_up_emails = set(r[0].lower() for r in user_result.all() if r[0])
+
+    # All contact emails for funnel
+    contact_emails_result = await db.execute(
+        select(OutreachContact.email).where(OutreachContact.email.isnot(None))
+    )
+    all_contact_emails = set(r[0].lower() for r in contact_emails_result.all() if r[0])
+
+    sent_emails_result = await db.execute(
+        select(OutreachContact.email).where(
+            and_(
+                OutreachContact.status.in_(["sent", "delivered"]),
+                OutreachContact.email.isnot(None),
+            )
+        )
+    )
+    sent_emails = set(r[0].lower() for r in sent_emails_result.all() if r[0])
 
     funnel = {
         "total_contacts": total,
@@ -753,23 +770,24 @@ async def get_stats(
         "opened": len(opened_emails & all_contact_emails),
         "clicked": len(clicked_emails & all_contact_emails),
         "signed_up": len(signed_up_emails & all_contact_emails),
-        "used_analysis": len(used_analysis_emails & all_contact_emails),
+        "used_analysis": 0,  # TODO: cross-ref with usage_events when needed
     }
 
-    # Per-contact engagement for the contacts table
+    # Per-contact engagement
     contact_engagement: dict[str, dict] = {}
-    for c in _contacts.values():
-        email = (c.get("email") or "").lower()
-        if email:
-            contact_engagement[email] = {
-                "opened": email in opened_emails,
-                "clicked": email in clicked_emails,
-                "signed_up": email in signed_up_emails,
-                "used_analysis": email in used_analysis_emails,
-            }
+    for email in all_contact_emails:
+        contact_engagement[email] = {
+            "opened": email in opened_emails,
+            "clicked": email in clicked_emails,
+            "signed_up": email in signed_up_emails,
+            "used_analysis": False,
+        }
 
     # Recent sends
-    recent = sorted(_send_log, key=lambda s: s.get("created_at", ""), reverse=True)[:20]
+    recent_result = await db.execute(
+        select(OutreachSendLog).order_by(OutreachSendLog.created_at.desc()).limit(20)
+    )
+    recent = recent_result.scalars().all()
 
     return {
         "total": total,
@@ -779,11 +797,11 @@ async def get_stats(
         "contact_engagement": contact_engagement,
         "recent_sends": [
             {
-                "email": s.get("email"),
-                "send_type": s.get("send_type"),
-                "status": s.get("status"),
-                "subject": s.get("subject"),
-                "created_at": s.get("created_at"),
+                "email": s.email,
+                "send_type": s.send_type,
+                "status": s.status,
+                "subject": s.subject,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
             }
             for s in recent
         ],
@@ -797,18 +815,19 @@ async def track_click(
     u: str = "",
     e: str = "",
     request: Request = None,
+    db: AsyncSession = Depends(get_db),
 ):
     url = unquote(u)
     email = unquote(e)
     if email:
-        _clicks.append({
-            "id": str(uuid.uuid4()),
-            "email": email.lower(),
-            "url": url[:1000],
-            "ip": (request.client.host if request and request.client else None),
-            "user_agent": (request.headers.get("user-agent", "")[:500] if request else None),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        click = OutreachClick(
+            email=email.lower(),
+            url=url[:2000],
+            ip=(request.client.host if request and request.client else None),
+            user_agent=(request.headers.get("user-agent", "")[:500] if request else None),
+        )
+        db.add(click)
+        await db.flush()
     return RedirectResponse(url or WEBSITE, status_code=302)
 
 
@@ -816,17 +835,18 @@ async def track_click(
 async def track_open(
     e: str = "",
     request: Request = None,
+    db: AsyncSession = Depends(get_db),
 ):
     email = unquote(e)
     if email:
-        _clicks.append({
-            "id": str(uuid.uuid4()),
-            "email": email.lower(),
-            "url": "__open__",
-            "ip": (request.client.host if request and request.client else None),
-            "user_agent": (request.headers.get("user-agent", "")[:500] if request else None),
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        click = OutreachClick(
+            email=email.lower(),
+            url="__open__",
+            ip=(request.client.host if request and request.client else None),
+            user_agent=(request.headers.get("user-agent", "")[:500] if request else None),
+        )
+        db.add(click)
+        await db.flush()
     # 1x1 transparent GIF
     gif = b"\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x80\x00\x00\xff\xff\xff\x00\x00\x00\x21\xf9\x04\x00\x00\x00\x00\x00\x2c\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02\x44\x01\x00\x3b"
     return Response(content=gif, media_type="image/gif", headers={"Cache-Control": "no-store"})
@@ -838,16 +858,20 @@ async def track_open(
 async def unsubscribe(
     e: str = "",
     t: str = "",
+    db: AsyncSession = Depends(get_db),
 ):
     email = unquote(e).lower()
     if not email or _hmac_token(email) != t:
         return HTMLResponse("<h2>Invalid unsubscribe link.</h2>", status_code=400)
 
-    for c in _contacts.values():
-        if c.get("email") == email:
-            c["unsubscribed"] = True
-            c["status"] = "unsubscribed"
-            break
+    result = await db.execute(
+        select(OutreachContact).where(OutreachContact.email == email)
+    )
+    contact = result.scalar_one_or_none()
+    if contact:
+        contact.unsubscribed = True
+        contact.status = "unsubscribed"
+        await db.flush()
 
     return HTMLResponse(f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Unsubscribed</title></head>
@@ -867,31 +891,36 @@ You won&rsquo;t receive any more emails from HireIQ. If this was a mistake, cont
 async def enrich_contact(
     contact_id: str,
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     """Scrape a contact's website for email addresses."""
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
 
-    contact = _contacts.get(contact_id)
+    result = await db.execute(
+        select(OutreachContact).where(OutreachContact.id == uuid.UUID(contact_id))
+    )
+    contact = result.scalar_one_or_none()
     if not contact:
         return JSONResponse({"error": "Not found"}, 404)
 
-    if not contact.get("website"):
+    if not contact.website:
         return JSONResponse({"error": "No website URL on this contact"}, 400)
 
-    result = await scrape_website_for_emails(contact["website"])
+    scrape_result = await scrape_website_for_emails(contact.website)
 
-    had_email = bool(contact.get("email"))
-    if result["emails"] and not had_email:
-        contact["email"] = result["emails"][0]
-        contact["source"] = contact.get("source") or "enriched"
+    had_email = bool(contact.email)
+    if scrape_result["emails"] and not had_email:
+        contact.email = scrape_result["emails"][0]
+        contact.source = contact.source or "enriched"
+        await db.flush()
 
     return {
         "contact_id": contact_id,
-        "website": contact["website"],
-        "emails_found": result["emails"],
-        "pages_checked": result["pages_checked"],
-        "auto_set": result["emails"][0] if result["emails"] and not had_email else None,
+        "website": contact.website,
+        "emails_found": scrape_result["emails"],
+        "pages_checked": scrape_result["pages_checked"],
+        "auto_set": scrape_result["emails"][0] if scrape_result["emails"] and not had_email else None,
     }
 
 
@@ -899,50 +928,58 @@ async def enrich_contact(
 async def enrich_batch(
     limit: int = Query(20),
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     """Scrape websites for contacts that have a website but no email."""
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
 
-    candidates = [
-        c for c in _contacts.values()
-        if c.get("website")
-        and not c.get("email")
-        and not c.get("unsubscribed")
-        and c.get("enrich_status") not in ("enriched_no_email", "enrich_error")
-    ]
-    candidates = candidates[:limit]
+    candidates_result = await db.execute(
+        select(OutreachContact).where(
+            and_(
+                OutreachContact.website.isnot(None),
+                or_(OutreachContact.email.is_(None), OutreachContact.email == ""),
+                OutreachContact.unsubscribed == False,
+                or_(
+                    OutreachContact.enrich_status.is_(None),
+                    ~OutreachContact.enrich_status.in_(["enriched_no_email", "enrich_error"]),
+                ),
+            )
+        ).limit(limit)
+    )
+    candidates = list(candidates_result.scalars().all())
 
     results = []
     for contact in candidates:
         try:
-            result = await scrape_website_for_emails(contact["website"])
-            if result["emails"]:
-                contact["email"] = result["emails"][0]
-                contact["enrich_status"] = "enriched"
+            scrape_result = await scrape_website_for_emails(contact.website)
+            if scrape_result["emails"]:
+                contact.email = scrape_result["emails"][0]
+                contact.enrich_status = "enriched"
                 results.append({
-                    "company": contact.get("company_name"),
-                    "website": contact["website"],
-                    "email": result["emails"][0],
-                    "all_emails": result["emails"],
+                    "company": contact.company_name,
+                    "website": contact.website,
+                    "email": scrape_result["emails"][0],
+                    "all_emails": scrape_result["emails"],
                 })
             else:
-                contact["enrich_status"] = "enriched_no_email"
+                contact.enrich_status = "enriched_no_email"
                 results.append({
-                    "company": contact.get("company_name"),
-                    "website": contact["website"],
+                    "company": contact.company_name,
+                    "website": contact.website,
                     "email": None,
                     "all_emails": [],
                 })
-        except Exception as e:
-            contact["enrich_status"] = "enrich_error"
+        except Exception as exc:
+            contact.enrich_status = "enrich_error"
             results.append({
-                "company": contact.get("company_name"),
-                "website": contact["website"],
+                "company": contact.company_name,
+                "website": contact.website,
                 "email": None,
-                "error": str(e),
+                "error": str(exc),
             })
 
+    await db.flush()
     enriched = sum(1 for r in results if r.get("email"))
     return {"processed": len(results), "enriched": enriched, "results": results}
 
@@ -952,6 +989,7 @@ async def scrape_directory(
     source: str = Query("google"),
     query: str = Query("recruitment agency Australia"),
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     """Scrape a directory for new agency contacts."""
     if not _verify(hiq_outreach):
@@ -969,42 +1007,40 @@ async def scrape_directory(
         email = agency.get("email", "")
 
         # Deduplicate by website or email
-        already_exists = any(
-            (website and c.get("website") == website) or
-            (email and c.get("email") == email)
-            for c in _contacts.values()
-        )
-        if already_exists:
-            skipped += 1
-            continue
+        dedup_conditions = []
+        if website:
+            dedup_conditions.append(OutreachContact.website == website)
+        if email:
+            dedup_conditions.append(OutreachContact.email == email)
 
-        cid = str(uuid.uuid4())
-        _contacts[cid] = {
-            "id": cid,
-            "company_name": agency.get("company_name"),
-            "contact_name": None,
-            "email": email or None,
-            "phone": None,
-            "website": website or None,
-            "location": agency.get("location", "Australia"),
-            "industry": agency.get("industry", "general"),
-            "role_type": "agency_director",
-            "source": agency.get("source", source),
-            "status": "not_started",
-            "unsubscribed": False,
-            "send_count": 0,
-            "date_contacted": None,
-            "notes": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        if dedup_conditions:
+            exists_result = await db.execute(
+                select(func.count()).select_from(OutreachContact).where(or_(*dedup_conditions))
+            )
+            if (exists_result.scalar() or 0) > 0:
+                skipped += 1
+                continue
+
+        contact = OutreachContact(
+            company_name=agency.get("company_name"),
+            email=email or None,
+            website=website or None,
+            location=agency.get("location", "Australia"),
+            industry=agency.get("industry", "general"),
+            role_type="agency_director",
+            source=agency.get("source", source),
+        )
+        db.add(contact)
         created += 1
 
+    await db.flush()
     return {"source": source, "found": len(agencies), "created": created, "skipped": skipped}
 
 
 @router.post("/api/seed")
 async def seed_from_csv(
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     """Load the built-in AU agencies CSV as starter contacts."""
     if not _verify(hiq_outreach):
@@ -1030,35 +1066,28 @@ async def seed_from_csv(
             continue
 
         # Deduplicate by website
-        already_exists = any(
-            website and c.get("website") == website
-            for c in _contacts.values()
-        )
-        if already_exists:
-            skipped += 1
-            continue
+        if website:
+            exists_result = await db.execute(
+                select(func.count()).select_from(OutreachContact).where(
+                    OutreachContact.website == website
+                )
+            )
+            if (exists_result.scalar() or 0) > 0:
+                skipped += 1
+                continue
 
-        cid = str(uuid.uuid4())
-        _contacts[cid] = {
-            "id": cid,
-            "company_name": company or None,
-            "contact_name": None,
-            "email": None,
-            "phone": None,
-            "website": website or None,
-            "location": (row.get("location") or "").strip() or "Australia",
-            "industry": (row.get("industry") or "").strip() or "general",
-            "role_type": (row.get("role_type") or "").strip() or "agency_director",
-            "source": "au_agencies_csv",
-            "status": "not_started",
-            "unsubscribed": False,
-            "send_count": 0,
-            "date_contacted": None,
-            "notes": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
+        contact = OutreachContact(
+            company_name=company or None,
+            website=website or None,
+            location=(row.get("location") or "").strip() or "Australia",
+            industry=(row.get("industry") or "").strip() or "general",
+            role_type=(row.get("role_type") or "").strip() or "agency_director",
+            source="au_agencies_csv",
+        )
+        db.add(contact)
         created += 1
 
+    await db.flush()
     return {"total_in_csv": len(rows), "created": created, "skipped": skipped}
 
 
@@ -1066,37 +1095,33 @@ async def seed_from_csv(
 async def scrape_recruiters_from_agencies(
     limit: int = 10,
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
-    """Scrape team pages of seeded agencies to find individual recruiter names + emails.
-
-    For each agency contact that has a website but no individual recruiter contacts,
-    scrapes the team/people page for names, guesses emails from the domain.
-    Creates new individual contacts linked to the agency.
-    """
+    """Scrape team pages of seeded agencies to find individual recruiter names + emails."""
     if not _verify(hiq_outreach):
         return JSONResponse({"error": "Unauthorized"}, 401)
 
     from app.services.recruiter_scraper import scrape_agency_for_recruiters
 
     # Find agency contacts with websites that we haven't scraped yet
-    agencies_to_scrape = []
-    for cid, c in _contacts.items():
-        if (
-            c.get("website")
-            and c.get("source") in ("au_agencies_csv", "google_search", "rcsa_directory")
-            and not c.get("_recruiters_scraped")
-        ):
-            agencies_to_scrape.append((cid, c))
-        if len(agencies_to_scrape) >= limit:
-            break
+    agencies_result = await db.execute(
+        select(OutreachContact).where(
+            and_(
+                OutreachContact.website.isnot(None),
+                OutreachContact.source.in_(["au_agencies_csv", "google_search", "rcsa_directory"]),
+                OutreachContact.recruiters_scraped == False,
+            )
+        ).limit(limit)
+    )
+    agencies_to_scrape = list(agencies_result.scalars().all())
 
     total_recruiters = 0
     agencies_processed = 0
     results = []
 
-    for cid, agency in agencies_to_scrape:
-        website = agency["website"]
-        company = agency.get("company_name", "Unknown")
+    for agency in agencies_to_scrape:
+        website = agency.website
+        company = agency.company_name or "Unknown"
 
         try:
             recruiters = await scrape_agency_for_recruiters(website)
@@ -1109,36 +1134,33 @@ async def scrape_recruiters_from_agencies(
                     continue
 
                 # Skip if we already have this person
-                already_exists = any(
-                    c.get("contact_name") == name and c.get("company_name") == company
-                    for c in _contacts.values()
+                exists_result = await db.execute(
+                    select(func.count()).select_from(OutreachContact).where(
+                        and_(
+                            OutreachContact.contact_name == name,
+                            OutreachContact.company_name == company,
+                        )
+                    )
                 )
-                if already_exists:
+                if (exists_result.scalar() or 0) > 0:
                     continue
 
-                new_id = str(uuid.uuid4())
-                _contacts[new_id] = {
-                    "id": new_id,
-                    "company_name": company,
-                    "contact_name": name,
-                    "email": email,
-                    "phone": None,
-                    "website": website,
-                    "location": agency.get("location", "Australia"),
-                    "industry": agency.get("industry", "general"),
-                    "role_type": "recruiter",
-                    "source": person.get("source", "team_page_scrape"),
-                    "status": "not_started",
-                    "unsubscribed": False,
-                    "send_count": 0,
-                    "date_contacted": None,
-                    "notes": f"Guessed emails: {', '.join(person.get('guessed_emails', [])[:3])}" if person.get("guessed_emails") else None,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }
+                new_contact = OutreachContact(
+                    company_name=company,
+                    contact_name=name,
+                    email=email,
+                    website=website,
+                    location=agency.location or "Australia",
+                    industry=agency.industry or "general",
+                    role_type="recruiter",
+                    source=person.get("source", "team_page_scrape"),
+                    notes=f"Guessed emails: {', '.join(person.get('guessed_emails', [])[:3])}" if person.get("guessed_emails") else None,
+                )
+                db.add(new_contact)
                 total_recruiters += 1
 
             # Mark this agency as scraped
-            _contacts[cid]["_recruiters_scraped"] = True
+            agency.recruiters_scraped = True
             agencies_processed += 1
 
             results.append({
@@ -1147,11 +1169,12 @@ async def scrape_recruiters_from_agencies(
                 "recruiters_found": len(recruiters),
             })
 
-        except Exception as e:
-            logger.warning("Failed to scrape %s: %s", website, e)
-            _contacts[cid]["_recruiters_scraped"] = True
-            results.append({"agency": company, "website": website, "error": str(e)})
+        except Exception as exc:
+            logger.warning("Failed to scrape %s: %s", website, exc)
+            agency.recruiters_scraped = True
+            results.append({"agency": company, "website": website, "error": str(exc)})
 
+    await db.flush()
     return {
         "agencies_processed": agencies_processed,
         "total_recruiters_found": total_recruiters,
@@ -1182,15 +1205,16 @@ def _login_html(error: str = "") -> str:
 @router.get("/")
 async def dashboard(
     hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
 ):
     if not _verify(hiq_outreach):
         return _unauth()
 
     # Fetch stats for KPI cards
-    status_counts: dict[str, int] = {}
-    for c in _contacts.values():
-        s = c.get("status", "not_started")
-        status_counts[s] = status_counts.get(s, 0) + 1
+    status_result = await db.execute(
+        select(OutreachContact.status, func.count()).group_by(OutreachContact.status)
+    )
+    status_counts = dict(status_result.all())
     total = sum(status_counts.values())
 
     return HTMLResponse(_dashboard_html(total, status_counts))

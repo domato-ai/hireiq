@@ -24,6 +24,14 @@ class User(Base):
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    password_hash: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+        comment="PBKDF2 hash for email/password auth (null for Entra ID users)",
+    )
+    stripe_customer_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, unique=True, index=True,
+        comment="Stripe customer ID for billing",
+    )
     entra_id: Mapped[str | None] = mapped_column(
         String(255), unique=True, nullable=True, index=True,
         comment="Azure Entra ID (OID claim from the ID token)",
