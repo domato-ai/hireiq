@@ -40,6 +40,10 @@ class OutreachContact(Base):
         String(50), nullable=True,
         comment="enriched|enriched_no_email|enrich_error",
     )
+    country: Mapped[str | None] = mapped_column(
+        String(2), nullable=True, index=True,
+        comment="ISO 3166-1 alpha-2 country code: AU, US, GB, etc.",
+    )
     recruiters_scraped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -62,6 +66,7 @@ class OutreachContact(Base):
             "send_count": self.send_count,
             "date_contacted": self.date_contacted.isoformat() if self.date_contacted else None,
             "notes": self.notes,
+            "country": self.country,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 

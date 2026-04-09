@@ -390,6 +390,7 @@ class ContactUpdate(BaseModel):
 async def list_contacts(
     status: str | None = None,
     industry: str | None = None,
+    country: str | None = None,
     search: str | None = None,
     limit: int = 200,
     offset: int = 0,
@@ -405,6 +406,8 @@ async def list_contacts(
         query = query.where(OutreachContact.status == status)
     if industry:
         query = query.where(OutreachContact.industry.ilike(f"%{industry}%"))
+    if country:
+        query = query.where(OutreachContact.country == country.upper())
     if search:
         s = f"%{search}%"
         query = query.where(
@@ -700,6 +703,7 @@ async def send_batch(
 
 @router.get("/api/stats")
 async def get_stats(
+    country: str | None = None,
     hiq_outreach: str | None = Cookie(None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -708,9 +712,14 @@ async def get_stats(
 
     from app.models.user import User
 
+    # Base filter for country
+    country_filter = OutreachContact.country == country.upper() if country else True
+
     # Status counts
     status_result = await db.execute(
-        select(OutreachContact.status, func.count()).group_by(OutreachContact.status)
+        select(OutreachContact.status, func.count())
+        .where(country_filter)
+        .group_by(OutreachContact.status)
     )
     status_counts = dict(status_result.all())
     total = sum(status_counts.values())
@@ -1306,6 +1315,7 @@ tr:hover{{background:#111118}}
 <div class="kpis">{kpi_html}</div>
 
 <div class="toolbar">
+<select id="f-country" onchange="loadContacts()" style="font-weight:600"><option value="">All Countries</option><option value="AU">AU</option><option value="US">US</option><option value="GB">UK</option><option value="CA">CA</option><option value="IN">IN</option><option value="SG">SG</option></select>
 <select id="f-industry" onchange="loadContacts()"><option value="">All Industries</option>{industry_options}</select>
 <select id="f-status" onchange="loadContacts()"><option value="">All Statuses</option>{status_options}</select>
 <input id="f-search" placeholder="Search..." oninput="debounceSearch()" style="flex:1;min-width:180px;" />
@@ -1383,16 +1393,18 @@ async function api(path,opts={{}}){{
 let _contactEngagement={{}};
 
 async function loadContacts(){{
+  const country=document.getElementById('f-country').value;
   const industry=document.getElementById('f-industry').value;
   const status=document.getElementById('f-status').value;
   const search=document.getElementById('f-search').value;
   let qs='?limit=200';
+  if(country)qs+='&country='+country;
   if(industry)qs+='&industry='+industry;
   if(status)qs+='&status='+status;
   if(search)qs+='&search='+encodeURIComponent(search);
   const data=await api('/contacts'+qs);
   // Fetch engagement data
-  const stats=await api('/stats');
+  const stats=await api('/stats'+(country?'?country='+country:''));
   _contactEngagement=stats.contact_engagement||{{}};
   const tbody=document.getElementById('contacts-body');
   tbody.innerHTML=data.contacts.map(c=>{{
@@ -1502,7 +1514,8 @@ async function importCSV(input){{
 }}
 
 async function loadStats(){{
-  const s=await api('/stats');
+  const country=document.getElementById('f-country').value;
+  const s=await api('/stats'+(country?'?country='+country:''));
   const eng=s.engagement||{{}};
   const f=s.funnel||{{}};
   let html='';
