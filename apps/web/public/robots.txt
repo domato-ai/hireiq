@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /workspaces/
+Disallow: /billing/
+
+Sitemap: https://hireiq.domato.ai/sitemap.xml
