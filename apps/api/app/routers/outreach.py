@@ -609,9 +609,11 @@ async def send_email(
         return JSONResponse({"error": "Contact has unsubscribed"}, 400)
 
     contact_dict = contact.to_dict()
-    html = _build_email_html(contact_dict)
-    cname = contact.contact_name or "you"
-    subject = f"Stop spending hours screening resumes — {cname}"
+    email_config = await _load_email_config(db)
+    from app.services.email_template import build_email_html, build_subject
+    html = build_email_html(contact_dict, email_config, BACKEND_URL)
+    html = html.replace("__UNSUB_TOKEN__", _hmac_token(contact.email or ""))
+    subject = build_subject(contact_dict, email_config)
     to_email = FROM_EMAIL if test else (contact.email or "")
 
     smtp_result = _send_email_smtp(to_email, subject, html)
@@ -671,12 +673,15 @@ async def send_batch(
     )
     followup_contacts = list(followup_result.scalars().all())
 
+    email_config = await _load_email_config(db)
+    from app.services.email_template import build_email_html, build_subject
+
     results = []
     for contact in new_contacts + followup_contacts:
         contact_dict = contact.to_dict()
-        html = _build_email_html(contact_dict)
-        cname = contact.contact_name or "you"
-        subject = f"Stop spending hours screening resumes — {cname}"
+        html = build_email_html(contact_dict, email_config, BACKEND_URL)
+        html = html.replace("__UNSUB_TOKEN__", _hmac_token(contact.email or ""))
+        subject = build_subject(contact_dict, email_config)
         email = contact.email or ""
         smtp_result = _send_email_smtp(email, subject, html)
 
@@ -697,6 +702,74 @@ async def send_batch(
 
     await db.flush()
     return {"sent": len(results), "results": results}
+
+
+# ── Email Template Config ─────────────────────────────────────────
+
+async def _load_email_config(db: AsyncSession) -> dict:
+    """Load email template config from DB, merged with defaults."""
+    from app.services.email_template import get_config_with_defaults
+    from sqlalchemy import text
+    row = await db.execute(text("SELECT config FROM outreach_email_config WHERE id = 'default'"))
+    saved = row.scalar_one_or_none()
+    return get_config_with_defaults(saved)
+
+
+@router.get("/api/template")
+async def get_template_config(
+    hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the current email template config (merged with defaults)."""
+    if not _verify(hiq_outreach):
+        return JSONResponse({"error": "Unauthorized"}, 401)
+    config = await _load_email_config(db)
+    return config
+
+
+@router.put("/api/template")
+async def save_template_config(
+    request: Request,
+    hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save email template config (partial update — only saves provided keys)."""
+    if not _verify(hiq_outreach):
+        return JSONResponse({"error": "Unauthorized"}, 401)
+    body = await request.json()
+    from sqlalchemy import text
+    await db.execute(
+        text("""
+            INSERT INTO outreach_email_config (id, config, updated_at)
+            VALUES ('default', :config::jsonb, NOW())
+            ON CONFLICT (id) DO UPDATE SET config = :config::jsonb, updated_at = NOW()
+        """),
+        {"config": __import__("json").dumps(body)},
+    )
+    await db.flush()
+    return {"ok": True}
+
+
+@router.get("/api/template/preview")
+async def preview_template(
+    hiq_outreach: str | None = Cookie(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Preview the email template with sample data."""
+    if not _verify(hiq_outreach):
+        return JSONResponse({"error": "Unauthorized"}, 401)
+    from app.services.email_template import build_email_html, build_subject
+    config = await _load_email_config(db)
+    sample_contact = {
+        "contact_name": "Jane Smith",
+        "company_name": "Acme Recruitment",
+        "email": "preview@example.com",
+        "industry": "tech",
+    }
+    html = build_email_html(sample_contact, config, BACKEND_URL)
+    html = html.replace("__UNSUB_TOKEN__", "preview")
+    subject = build_subject(sample_contact, config)
+    return HTMLResponse(f"<h3 style='font-family:system-ui;padding:12px;background:#111;color:#ccc;margin:0;'>Subject: {subject}</h3>{html}")
 
 
 # ── Stats ────────────────────────────────────────────────────────
@@ -1306,6 +1379,7 @@ tr:hover{{background:#111118}}
 <div class="tabs">
 <button class="tab active" onclick="showTab('contacts')">Contacts</button>
 <button class="tab" onclick="showTab('analytics')">Analytics</button>
+<button class="tab" onclick="showTab('template')">Email Template</button>
 </div>
 
 <div class="content">
@@ -1344,6 +1418,39 @@ tr:hover{{background:#111118}}
 <div id="stats-content"><p style="color:#64748b;">Loading...</p></div>
 </div>
 
+<!-- TEMPLATE TAB -->
+<div id="tab-template" class="panel">
+<div style="display:flex;gap:20px;flex-wrap:wrap;">
+
+<!-- Left: Editor -->
+<div style="flex:1;min-width:340px;">
+<div class="card">
+<h3 style="margin-bottom:16px;color:#e2e8f0;">Email Template Editor</h3>
+<p style="color:#64748b;font-size:12px;margin-bottom:16px;">Edit any field below. Changes apply to all future outreach emails.</p>
+
+<div id="tpl-fields"></div>
+
+<div style="display:flex;gap:12px;margin-top:16px;">
+<button class="btn btn-primary" onclick="saveTemplate()">Save Template</button>
+<button class="btn" style="background:#2a2a40;color:#e2e8f0;" onclick="resetTemplate()">Reset to Defaults</button>
+</div>
+</div>
+</div>
+
+<!-- Right: Preview -->
+<div style="flex:1;min-width:340px;">
+<div class="card" style="padding:0;overflow:hidden;">
+<div style="padding:12px 16px;border-bottom:1px solid #1e1e30;display:flex;justify-content:space-between;align-items:center;">
+<h3 style="color:#e2e8f0;font-size:14px;">Preview</h3>
+<button class="btn btn-sm" style="background:#2a2a40;color:#94a3b8;" onclick="refreshPreview()">Refresh</button>
+</div>
+<iframe id="tpl-preview" style="width:100%;height:800px;border:none;background:#0a0a0a;" src=""></iframe>
+</div>
+</div>
+
+</div>
+</div>
+
 </div>
 
 <!-- ADD/EDIT MODAL -->
@@ -1375,6 +1482,7 @@ function showTab(t){{
   event.target.classList.add('active');
   if(t==='contacts')loadContacts();
   if(t==='analytics')loadStats();
+  if(t==='template')loadTemplate();
 }}
 
 function toast(msg,ok=true){{
@@ -1618,6 +1726,155 @@ async function enrichOne(id){{
   }}
   status.textContent='';
   loadContacts();
+}}
+
+// ── Template Editor ──
+let _tplConfig={{}};
+const TPL_FIELDS=[
+  {{section:'Brand',fields:[
+    {{key:'brand_name',label:'Brand Name',type:'text'}},
+    {{key:'brand_tagline',label:'Tagline',type:'text'}},
+    {{key:'brand_tagline_bold',label:'Tagline (Bold)',type:'text'}},
+    {{key:'website_url',label:'Website URL',type:'text'}},
+    {{key:'company_legal',label:'Legal Line',type:'text'}},
+  ]}},
+  {{section:'Greeting',fields:[
+    {{key:'greeting_template',label:'Greeting (use {{first_name}})',type:'text'}},
+    {{key:'intro_template',label:'Intro (use {{company}})',type:'textarea'}},
+  ]}},
+  {{section:'Solution',fields:[
+    {{key:'solution_text',label:'Solution Text (HTML ok)',type:'textarea'}},
+  ]}},
+  {{section:'CTA',fields:[
+    {{key:'cta_headline',label:'CTA Headline',type:'text'}},
+    {{key:'cta_subtext',label:'CTA Subtext',type:'text'}},
+    {{key:'cta_button_text',label:'Button Text',type:'text'}},
+    {{key:'cta_fine_print',label:'Fine Print',type:'text'}},
+  ]}},
+  {{section:'Subject Line',fields:[
+    {{key:'subject_template',label:'Subject (use {{contact_name}})',type:'text'}},
+  ]}},
+  {{section:'Sign-off',fields:[
+    {{key:'signoff_line1',label:'Line 1',type:'text'}},
+    {{key:'signoff_line2',label:'Line 2',type:'text'}},
+  ]}},
+];
+
+async function loadTemplate(){{
+  _tplConfig=await api('/template');
+  renderTemplateFields();
+  refreshPreview();
+}}
+
+function renderTemplateFields(){{
+  const container=document.getElementById('tpl-fields');
+  let html='';
+  TPL_FIELDS.forEach(section=>{{
+    html+=`<div style="margin-bottom:16px;"><h4 style="color:#a78bfa;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">${{section.section}}</h4>`;
+    section.fields.forEach(f=>{{
+      const val=_tplConfig[f.key]||'';
+      if(f.type==='textarea'){{
+        html+=`<div class="form-row"><div style="flex:1"><label>${{f.label}}</label><textarea id="tpl-${{f.key}}" rows="3" style="font-size:12px;">${{val}}</textarea></div></div>`;
+      }}else{{
+        html+=`<div class="form-row"><div style="flex:1"><label>${{f.label}}</label><input id="tpl-${{f.key}}" value="${{String(val).replace(/"/g,'&quot;')}}" /></div></div>`;
+      }}
+    }});
+    html+=`</div>`;
+  }});
+
+  // Pain points editor
+  html+=`<div style="margin-bottom:16px;"><h4 style="color:#a78bfa;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Pain Points (by Industry)</h4>`;
+  const pains=_tplConfig.pain_points||{{}};
+  ['tech','healthcare','finance','agency','general'].forEach(ind=>{{
+    const p=pains[ind]||{{}};
+    html+=`<details style="margin-bottom:8px;"><summary style="color:#e2e8f0;font-size:12px;cursor:pointer;font-weight:600;">${{ind.charAt(0).toUpperCase()+ind.slice(1)}}</summary>
+    <div class="form-row" style="margin-top:8px;"><div style="flex:1"><label>Headline</label><input id="tpl-pain-${{ind}}-headline" value="${{(p.headline||'').replace(/"/g,'&quot;')}}" /></div></div>
+    <div class="form-row"><div style="flex:1"><label>Detail</label><textarea id="tpl-pain-${{ind}}-detail" rows="2" style="font-size:12px;">${{p.detail||''}}</textarea></div></div>
+    </details>`;
+  }});
+  html+=`</div>`;
+
+  // Features editor
+  html+=`<div style="margin-bottom:16px;"><h4 style="color:#a78bfa;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">Feature Cards</h4>`;
+  const features=_tplConfig.features||[];
+  features.forEach((f,i)=>{{
+    html+=`<details style="margin-bottom:6px;"><summary style="color:#e2e8f0;font-size:12px;cursor:pointer;">${{f.icon}} ${{f.title}}</summary>
+    <div class="form-row" style="margin-top:6px;">
+    <div style="width:60px"><label>Icon</label><input id="tpl-feat-${{i}}-icon" value="${{f.icon}}" style="font-size:16px;text-align:center;" /></div>
+    <div style="flex:1"><label>Title</label><input id="tpl-feat-${{i}}-title" value="${{f.title}}" /></div>
+    </div>
+    <div class="form-row"><div style="flex:1"><label>Description</label><input id="tpl-feat-${{i}}-desc" value="${{f.desc.replace(/"/g,'&quot;')}}" /></div></div>
+    </details>`;
+  }});
+  html+=`</div>`;
+
+  // KPIs editor
+  html+=`<div style="margin-bottom:16px;"><h4 style="color:#a78bfa;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px;">KPI Row</h4>`;
+  const kpis=_tplConfig.kpis||[];
+  kpis.forEach((k,i)=>{{
+    html+=`<div class="form-row">
+    <div style="width:60px"><label>Icon</label><input id="tpl-kpi-${{i}}-icon" value="${{k.icon}}" style="font-size:16px;text-align:center;" /></div>
+    <div style="width:80px"><label>Value</label><input id="tpl-kpi-${{i}}-value" value="${{k.value}}" /></div>
+    <div style="flex:1"><label>Label</label><input id="tpl-kpi-${{i}}-label" value="${{k.label}}" /></div>
+    </div>`;
+  }});
+  html+=`</div>`;
+
+  container.innerHTML=html;
+}}
+
+function gatherTemplateData(){{
+  const data={{}};
+  TPL_FIELDS.forEach(s=>s.fields.forEach(f=>{{
+    const el=document.getElementById('tpl-'+f.key);
+    if(el)data[f.key]=el.value;
+  }}));
+
+  // Pain points
+  data.pain_points={{}};
+  ['tech','healthcare','finance','agency','general'].forEach(ind=>{{
+    const h=document.getElementById('tpl-pain-'+ind+'-headline');
+    const d=document.getElementById('tpl-pain-'+ind+'-detail');
+    if(h&&d)data.pain_points[ind]={{headline:h.value,detail:d.value}};
+  }});
+
+  // Features
+  data.features=[];
+  for(let i=0;i<6;i++){{
+    const icon=document.getElementById('tpl-feat-'+i+'-icon');
+    const title=document.getElementById('tpl-feat-'+i+'-title');
+    const desc=document.getElementById('tpl-feat-'+i+'-desc');
+    if(icon&&title&&desc)data.features.push({{icon:icon.value,title:title.value,desc:desc.value}});
+  }}
+
+  // KPIs
+  data.kpis=[];
+  for(let i=0;i<3;i++){{
+    const icon=document.getElementById('tpl-kpi-'+i+'-icon');
+    const val=document.getElementById('tpl-kpi-'+i+'-value');
+    const label=document.getElementById('tpl-kpi-'+i+'-label');
+    if(icon&&val&&label)data.kpis.push({{icon:icon.value,value:val.value,label:label.value}});
+  }}
+
+  return data;
+}}
+
+async function saveTemplate(){{
+  const data=gatherTemplateData();
+  await api('/template',{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify(data)}});
+  toast('Template saved!');
+  refreshPreview();
+}}
+
+async function resetTemplate(){{
+  if(!confirm('Reset all template fields to defaults?'))return;
+  await api('/template',{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{}})}});
+  toast('Template reset to defaults');
+  await loadTemplate();
+}}
+
+function refreshPreview(){{
+  document.getElementById('tpl-preview').src=API+'/template/preview?t='+Date.now();
 }}
 
 // Initial load

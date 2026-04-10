@@ -486,8 +486,12 @@ export default function HomePage() {
             </div>
             <video
               className="w-full"
+              autoPlay
+              muted
+              loop
+              playsInline
               controls
-              preload="metadata"
+              preload="auto"
               poster="https://sthireiqdevaue.blob.core.windows.net/videos/hireiq-demo-poster.jpg"
               style={{ background: "#0a0a0a" }}
             >
