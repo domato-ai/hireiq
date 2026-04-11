@@ -1353,6 +1353,7 @@ export default function HomePage() {
             <Link href="/terms" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Terms</Link>
             <Link href="/privacy" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Privacy</Link>
             <Link href="/contact" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Contact</Link>
+            <Link href="/blog" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Blog</Link>
           </div>
         </div>
       </footer>
