@@ -1150,6 +1150,65 @@ export default function HomePage() {
               ))}
             </div>
 
+            {/* Testimonials */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-10">
+              {[
+                {
+                  quote: "We used to spend half a day shortlisting for each role. Now it takes 5 minutes and the shortlists are better than what we produced manually.",
+                  name: "Sarah M.",
+                  role: "Talent Director",
+                  company: "Tech recruitment agency, Sydney",
+                  initials: "SM",
+                },
+                {
+                  quote: "The evidence-backed scoring completely changed our client conversations. We can now show exactly why we recommended each candidate.",
+                  name: "James R.",
+                  role: "Senior Recruiter",
+                  company: "Mid-size agency, Melbourne",
+                  initials: "JR",
+                },
+                {
+                  quote: "We needed a way to screen without bias. The structured scoring removes gut-feel decisions and our hiring outcomes have improved significantly.",
+                  name: "Priya K.",
+                  role: "HR Manager",
+                  company: "In-house team, Brisbane",
+                  initials: "PK",
+                },
+                {
+                  quote: "In healthcare recruitment, we get 80+ applications per role. HireIQ handles the volume and surfaces candidates we would have missed.",
+                  name: "Tom W.",
+                  role: "Agency Director",
+                  company: "Healthcare recruitment, Perth",
+                  initials: "TW",
+                },
+              ].map((t) => (
+                <div
+                  key={t.name}
+                  className="rounded-xl p-4"
+                  style={{
+                    background: "var(--card-bg)",
+                    border: "1px solid var(--card-border)",
+                  }}
+                >
+                  <p className="text-[12px] leading-relaxed mb-3" style={{ color: "var(--text-muted)" }}>
+                    &ldquo;{t.quote}&rdquo;
+                  </p>
+                  <div className="flex items-center gap-2.5">
+                    <div
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                      style={{ background: "rgba(124,92,255,0.15)", color: "#a78bfa" }}
+                    >
+                      {t.initials}
+                    </div>
+                    <div>
+                      <p className="text-[12px] font-semibold" style={{ color: "var(--text-heading)" }}>{t.name}</p>
+                      <p className="text-[10px]" style={{ color: "var(--text-faint)" }}>{t.role} &middot; {t.company}</p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
             {/* Pricing section — adapts based on user plan */}
             {isPro ? (
               /* Pro user — show active plan card */
