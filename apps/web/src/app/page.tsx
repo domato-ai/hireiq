@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { NavLogo } from "@/components/ui/logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { track } from "@/lib/tracking";
 
 /* ─── API ────────────────────────────────────────────────────────────────── */
 
@@ -83,6 +84,71 @@ function scoreColor(score: number) {
   return score >= 75 ? "#34d399" : score >= 50 ? "#fbbf24" : "#f87171";
 }
 
+/* ─── Sample data for instant demo ──────────────────────────────────────── */
+
+const SAMPLE_RESULT: AnalysisResult = {
+  analysis_id: "demo-sample",
+  jd_requirements: { title: "Senior Full Stack Engineer", company: "NovaPay" },
+  total_processed: 3,
+  total_skipped: 0,
+  candidates: [
+    {
+      id: "demo-1", name: "Sarah Chen", current_title: "Senior Software Engineer", current_company: "PayRight",
+      location: "Sydney, NSW", years_experience: 7, overall_score: 92, recommendation: "strong_yes",
+      summary: "Exceptional match. 7 years full-stack experience with TypeScript, React/Next.js, Node.js, and PostgreSQL. Direct Stripe integration experience processing $800M annually. Led frontend migration and mentored 3 engineers. Strong fintech background at PayRight and CommBank.",
+      strengths: ["TypeScript + React/Next.js expertise (primary stack match)", "Production Stripe integration ($800M volume)", "PostgreSQL + Redis + AWS (exact infrastructure match)", "Fintech domain experience (PayRight, CommBank)", "Mentoring and technical leadership"],
+      risks: ["May expect senior/lead title given experience level"],
+      missing_evidence: [],
+      factor_scores: {
+        "Technical Skills": { score: 95, label: "Technical Skills", weight: 25, verdict: "strong", jd_required: "TypeScript, React, Next.js, Node.js, PostgreSQL", candidate_has: "TypeScript, React, Next.js, Node.js, FastAPI, PostgreSQL, Redis", reasoning: "Full stack match across all required technologies plus additional backend expertise.", matched: ["TypeScript", "React", "Next.js", "Node.js", "PostgreSQL", "Redis"], missing: [] },
+        "Experience Level": { score: 90, label: "Experience Level", weight: 20, verdict: "strong", jd_required: "5+ years professional experience", candidate_has: "7 years across PayRight, CommBank, Atlassian", reasoning: "Exceeds minimum requirement with progressive seniority.", matched: ["7 years experience", "Senior title"], missing: [] },
+        "Domain Knowledge": { score: 95, label: "Domain Knowledge", weight: 15, verdict: "strong", jd_required: "Payment systems, financial APIs, regulated industries", candidate_has: "Stripe Connect integration, institutional banking, PCI DSS", reasoning: "Deep fintech experience across payments and banking.", matched: ["Stripe", "payments", "banking", "PCI DSS"], missing: [] },
+        "Cloud & Infrastructure": { score: 90, label: "Cloud & Infrastructure", weight: 10, verdict: "strong", jd_required: "AWS or GCP", candidate_has: "AWS (ECS, RDS, SQS, S3), Terraform, Docker, Kubernetes", reasoning: "Production AWS experience with IaC.", matched: ["AWS", "Terraform", "Docker"], missing: [] },
+        "Leadership": { score: 88, label: "Leadership", weight: 10, verdict: "strong", jd_required: "Mentor junior engineers, cross-functional work", candidate_has: "Mentored 3 juniors, conducted interviews, led migration", reasoning: "Demonstrated mentoring and technical leadership.", matched: ["mentoring", "interviews", "led migration"], missing: [] },
+        "Testing & CI/CD": { score: 92, label: "Testing & CI/CD", weight: 10, verdict: "strong", jd_required: "CI/CD pipelines, automated testing", candidate_has: "GitHub Actions, 95% coverage on payment paths, Jest, Playwright", reasoning: "Strong testing culture with high coverage on critical paths.", matched: ["GitHub Actions", "Jest", "Playwright", "95% coverage"], missing: [] },
+        "Communication": { score: 85, label: "Communication", weight: 5, verdict: "strong", jd_required: "Cross-functional collaboration", candidate_has: "API versioning strategy adopted by 4 teams, technical interviews", reasoning: "Evidence of cross-team influence.", matched: ["cross-team strategy", "interviews"], missing: [] },
+        "Culture Fit": { score: 88, label: "Culture Fit", weight: 5, verdict: "strong", jd_required: "Startup experience, high autonomy", candidate_has: "PayRight (Series B), Atlassian, progressive career", reasoning: "Startup and scale-up experience aligns well.", matched: ["Series B startup", "Atlassian"], missing: [] },
+      },
+    },
+    {
+      id: "demo-2", name: "Marcus Wright", current_title: "Full Stack Engineer", current_company: "SafetyCulture",
+      location: "Sydney, NSW", years_experience: 5, overall_score: 78, recommendation: "yes",
+      summary: "Strong match. 5 years with TypeScript, React/Next.js, Node.js, and PostgreSQL. Built real-time sync engine and automated testing. No direct payments experience but solid e-commerce background at THE ICONIC.",
+      strengths: ["TypeScript + React/Next.js + Node.js (core stack)", "PostgreSQL + Redis + AWS + Terraform", "Playwright testing expertise", "E-commerce checkout experience (THE ICONIC)"],
+      risks: ["No payment systems or fintech experience", "May need ramp-up on regulated industry requirements"],
+      missing_evidence: ["Payment platform experience", "Financial API integration"],
+      factor_scores: {
+        "Technical Skills": { score: 88, label: "Technical Skills", weight: 25, verdict: "strong", jd_required: "TypeScript, React, Next.js, Node.js, PostgreSQL", candidate_has: "TypeScript, React, Next.js, Node.js, Express, PostgreSQL", reasoning: "Strong match on all core technologies.", matched: ["TypeScript", "React", "Next.js", "Node.js", "PostgreSQL"], missing: [] },
+        "Experience Level": { score: 75, label: "Experience Level", weight: 20, verdict: "partial", jd_required: "5+ years professional experience", candidate_has: "5 years at SafetyCulture and THE ICONIC", reasoning: "Meets minimum requirement.", matched: ["5 years"], missing: [] },
+        "Domain Knowledge": { score: 45, label: "Domain Knowledge", weight: 15, verdict: "weak", jd_required: "Payment systems, financial APIs", candidate_has: "E-commerce checkout flow, inventory management", reasoning: "Adjacent experience but no direct payments/fintech.", matched: ["checkout flow"], missing: ["payment systems", "financial APIs", "regulated industry"] },
+        "Cloud & Infrastructure": { score: 85, label: "Cloud & Infrastructure", weight: 10, verdict: "strong", jd_required: "AWS or GCP", candidate_has: "AWS (ECS, Lambda, RDS, S3), Terraform, Docker", reasoning: "Strong AWS and IaC experience.", matched: ["AWS", "Terraform", "Docker"], missing: [] },
+        "Leadership": { score: 60, label: "Leadership", weight: 10, verdict: "partial", jd_required: "Mentor junior engineers", candidate_has: "No explicit mentoring evidence", reasoning: "Mid-level role without documented leadership.", matched: [], missing: ["mentoring evidence"] },
+        "Testing & CI/CD": { score: 90, label: "Testing & CI/CD", weight: 10, verdict: "strong", jd_required: "Automated testing, CI/CD", candidate_has: "Playwright, Jest, React Testing Library, GitHub Actions", reasoning: "Excellent testing and CI/CD practice.", matched: ["Playwright", "Jest", "GitHub Actions"], missing: [] },
+        "Communication": { score: 70, label: "Communication", weight: 5, verdict: "partial", jd_required: "Cross-functional", candidate_has: "Built features across teams", reasoning: "Some cross-functional evidence.", matched: [], missing: [] },
+        "Culture Fit": { score: 80, label: "Culture Fit", weight: 5, verdict: "strong", jd_required: "Startup experience", candidate_has: "SafetyCulture (scale-up), THE ICONIC", reasoning: "Growth-stage company experience.", matched: ["SafetyCulture", "THE ICONIC"], missing: [] },
+      },
+    },
+    {
+      id: "demo-3", name: "Tom Nguyen", current_title: "Software Engineer", current_company: "Suncorp Group",
+      location: "Brisbane, QLD", years_experience: 4, overall_score: 48, recommendation: "no",
+      summary: "Weak match. 4 years primarily in Java/Spring Boot enterprise environment. Basic React exposure through internal tools only. No TypeScript, no Node.js, no fintech. Would require significant ramp-up on the entire required stack.",
+      strengths: ["Some PostgreSQL experience", "REST API design", "Enterprise software discipline"],
+      risks: ["No TypeScript or Node.js experience", "Only basic React (internal tools)", "Java/Spring Boot primary stack — significant pivot needed", "Enterprise environment — may struggle with startup pace"],
+      missing_evidence: ["TypeScript proficiency", "React/Next.js production experience", "Node.js backend", "Payment systems", "AWS production experience", "CI/CD with GitHub Actions"],
+      factor_scores: {
+        "Technical Skills": { score: 30, label: "Technical Skills", weight: 25, verdict: "weak", jd_required: "TypeScript, React, Next.js, Node.js, PostgreSQL", candidate_has: "Java, Spring Boot, basic React, PostgreSQL", reasoning: "Major gaps in primary stack. Java developer with only basic React.", matched: ["PostgreSQL", "REST APIs"], missing: ["TypeScript", "Next.js", "Node.js"] },
+        "Experience Level": { score: 55, label: "Experience Level", weight: 20, verdict: "partial", jd_required: "5+ years", candidate_has: "4 years (Suncorp + QLD Gov)", reasoning: "Below minimum requirement.", matched: [], missing: ["1+ more year needed"] },
+        "Domain Knowledge": { score: 35, label: "Domain Knowledge", weight: 15, verdict: "weak", jd_required: "Payment systems, financial APIs", candidate_has: "Insurance claims processing", reasoning: "Financial services adjacent but no payments.", matched: ["financial services adjacent"], missing: ["payment systems", "financial APIs"] },
+        "Cloud & Infrastructure": { score: 40, label: "Cloud & Infrastructure", weight: 10, verdict: "weak", jd_required: "AWS or GCP", candidate_has: "Basic AWS, basic Azure", reasoning: "Minimal cloud experience.", matched: ["basic AWS"], missing: ["production AWS", "Terraform"] },
+        "Leadership": { score: 30, label: "Leadership", weight: 10, verdict: "weak", jd_required: "Mentor juniors", candidate_has: "No leadership evidence", reasoning: "Individual contributor role.", matched: [], missing: ["mentoring", "leadership"] },
+        "Testing & CI/CD": { score: 45, label: "Testing & CI/CD", weight: 10, verdict: "weak", jd_required: "CI/CD, automated testing", candidate_has: "Jenkins, basic Docker", reasoning: "Legacy CI tooling, no modern practices.", matched: ["Jenkins"], missing: ["GitHub Actions", "modern testing"] },
+        "Communication": { score: 55, label: "Communication", weight: 5, verdict: "partial", jd_required: "Cross-functional", candidate_has: "Agile ceremonies, documentation", reasoning: "Basic collaboration evidence.", matched: ["Agile", "documentation"], missing: [] },
+        "Culture Fit": { score: 40, label: "Culture Fit", weight: 5, verdict: "weak", jd_required: "Startup experience", candidate_has: "Enterprise only (Suncorp, QLD Gov)", reasoning: "No startup or scale-up experience.", matched: [], missing: ["startup experience"] },
+      },
+    },
+  ],
+};
+
 /* ─── Main page ─────────────────────────────────────────────────────────── */
 
 export default function HomePage() {
@@ -107,6 +173,8 @@ export default function HomePage() {
 
   const [upgraded, setUpgraded] = useState(false);
   const [pricing, setPricing] = useState<{ currency: string; symbol: string; pro_price: number } | null>(null);
+  const [campaign, setCampaign] = useState<string | null>(null);
+  const [isSampleData, setIsSampleData] = useState(false);
 
   useEffect(() => {
     // Fetch geo-based pricing
@@ -121,6 +189,17 @@ export default function HomePage() {
     // Check for ?upgraded=true from Stripe redirect
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
+      // Track page view
+      track("page_view");
+      // Campaign attribution
+      const ref = params.get("ref");
+      if (ref) {
+        setCampaign(ref);
+        localStorage.setItem("hireiq-ref", ref);
+      } else {
+        const storedRef = localStorage.getItem("hireiq-ref");
+        if (storedRef) setCampaign(storedRef);
+      }
       if (params.get("upgraded") === "true") {
         setUpgraded(true);
         // Update stored user plan to pro
@@ -167,6 +246,25 @@ export default function HomePage() {
   };
 
   const isPro = user?.plan === "pro" || (usage?.plan === "pro");
+
+  const handleTrySample = () => {
+    track("sample_clicked");
+    setAnalysisResult(SAMPLE_RESULT);
+    setIsSampleData(true);
+    setStep("results");
+    setExpandedId(SAMPLE_RESULT.candidates[0]?.id || null);
+  };
+
+  const handleStartFresh = () => {
+    setAnalysisResult(null);
+    setIsSampleData(false);
+    setStep("idle");
+    setJdText("");
+    setFiles([]);
+    setExpandedId(null);
+    setSelectedIds(new Set());
+    setCompareMode(false);
+  };
 
   const handleManageSubscription = async () => {
     const token = localStorage.getItem("hireiq-token");
@@ -266,6 +364,7 @@ export default function HomePage() {
   };
 
   const handleStart = async () => {
+    track("analyze_started", { resumes: files.length });
     setStep("analyzing");
     setError("");
     setExpandedId(null);
@@ -400,8 +499,9 @@ export default function HomePage() {
             </>
           ) : (
             <>
-              <Link href="/signup" className="text-[13px] transition-colors" style={{ color: "var(--text-muted)" }}>
-                Sign up
+              <Link href="/signup" className="text-[13px] font-semibold px-4 py-2 rounded-lg transition-all duration-200"
+                style={{ background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)", color: "#fff", boxShadow: "0 0 12px rgba(124,92,255,0.2)" }}>
+                Sign up free
               </Link>
               <ThemeToggle />
               <Link
@@ -432,7 +532,7 @@ export default function HomePage() {
         >
           <span className="w-1.5 h-1.5 rounded-full bg-[#7c5cff] metric-pulse" />
           <span className="text-[12px] font-medium" style={{ color: "rgba(124,92,255,0.9)" }}>
-            Evidence-first hiring decisions
+            {campaign === "outreach" ? "You were invited to try HireIQ" : "Evidence-first hiring decisions"}
           </span>
         </div>
 
@@ -449,7 +549,11 @@ export default function HomePage() {
             </>
           ) : (
             <>
-              Find the <span className="italic" style={{ color: "#a78bfa" }}>right</span> hire
+              {campaign === "outreach" ? (
+                <>See how your candidates <span className="italic" style={{ color: "#a78bfa" }}>stack up</span></>
+              ) : (
+                <>Find the <span className="italic" style={{ color: "#a78bfa" }}>right</span> hire</>
+              )}
             </>
           )}
         </h1>
@@ -459,9 +563,58 @@ export default function HomePage() {
           style={{ color: "var(--text-muted)" }}
         >
           {step === "results"
-            ? "Ranked by evidence strength. Click a card to see full analysis."
-            : "Paste a job description, upload resumes, and get an evidence-backed shortlist in seconds."}
+            ? (isSampleData
+              ? "This is sample data showing how HireIQ ranks candidates. Try it with your own resumes."
+              : "Ranked by evidence strength. Click a card to see full analysis.")
+            : (campaign === "outreach"
+              ? "Try our sample ranking instantly, or paste your own job description and upload resumes."
+              : "Paste a job description, upload resumes, and get an evidence-backed shortlist in seconds.")}
         </p>
+
+        {/* ── Try sample + social proof ── */}
+        {step === "idle" && (
+          <div className="flex flex-col items-center gap-4 mt-6 mb-2 home-stagger-2">
+            <button
+              onClick={handleTrySample}
+              className="px-6 py-3 rounded-xl text-sm font-semibold transition-all duration-300 active:scale-[0.98]"
+              style={{
+                background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
+                color: "#fff",
+                boxShadow: "0 0 24px rgba(124,92,255,0.3), 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.15)",
+              }}
+            >
+              See a sample ranking instantly
+            </button>
+            <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 text-[12px]" style={{ color: "var(--text-faint)" }}>
+              <span>Analyzes resumes in 30 seconds</span>
+              <span style={{ color: "var(--card-border)" }}>|</span>
+              <span>8-factor evidence scoring</span>
+              <span style={{ color: "var(--card-border)" }}>|</span>
+              <span>No hallucinations</span>
+              <span style={{ color: "var(--card-border)" }}>|</span>
+              <span>Free — no account needed</span>
+            </div>
+          </div>
+        )}
+
+        {/* ── Sample data banner in results ── */}
+        {step === "results" && isSampleData && (
+          <div
+            className="w-full max-w-[640px] mt-4 mb-2 px-4 py-3 rounded-xl flex items-center justify-between"
+            style={{ background: "rgba(124,92,255,0.08)", border: "1px solid rgba(124,92,255,0.2)" }}
+          >
+            <span className="text-[13px]" style={{ color: "var(--text-muted)" }}>
+              Viewing sample data — <strong style={{ color: "var(--text-heading)" }}>upload your own resumes to get started</strong>
+            </span>
+            <button
+              onClick={handleStartFresh}
+              className="px-3 py-1.5 rounded-lg text-[12px] font-semibold"
+              style={{ background: "rgba(124,92,255,0.15)", color: "#a78bfa" }}
+            >
+              Start fresh
+            </button>
+          </div>
+        )}
 
         {/* ── Demo video ── */}
         {step === "idle" && (
@@ -894,6 +1047,88 @@ export default function HomePage() {
             </>
           )}
         </div>
+
+        {/* ── Inline signup nudge (after results, for anonymous users) ── */}
+        {step === "results" && !user && (
+          <div
+            className="w-full max-w-[640px] mt-6 rounded-2xl p-5"
+            style={{
+              background: "var(--card-bg)",
+              border: "1px solid var(--card-border)",
+              boxShadow: "var(--card-shadow)",
+            }}
+          >
+            <p className="text-[14px] font-semibold mb-1" style={{ color: "var(--text-heading)" }}>
+              {isSampleData ? "Ready to try with your own resumes?" : "Like what you see?"}
+            </p>
+            <p className="text-[12px] mb-4" style={{ color: "var(--text-muted)" }}>
+              Create a free account to get 10 analyses/month. No credit card required.
+            </p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const form = e.currentTarget;
+                const email = (form.elements.namedItem("email") as HTMLInputElement).value;
+                const password = (form.elements.namedItem("password") as HTMLInputElement).value;
+                if (!email || password.length < 8) return;
+                try {
+                  const res = await fetch(`${API_URL}/api/v1/auth/register`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, password, name: "" }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.detail || "Registration failed");
+                  localStorage.setItem("hireiq-token", data.access_token);
+                  localStorage.setItem("hireiq-user", JSON.stringify(data.user));
+                  setUser(data.user);
+                  setError("");
+                  fetchUsage();
+                  track("signup_completed", { source: "inline" });
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Something went wrong");
+                }
+              }}
+              className="flex gap-2 flex-wrap"
+            >
+              <input
+                name="email"
+                type="email"
+                placeholder="Email"
+                required
+                className="flex-1 min-w-[160px] px-3 py-2.5 rounded-lg text-[13px]"
+                style={{
+                  background: "var(--input-bg)",
+                  border: "1px solid var(--input-border)",
+                  color: "var(--text-body)",
+                }}
+              />
+              <input
+                name="password"
+                type="password"
+                placeholder="Password (8+ chars)"
+                required
+                minLength={8}
+                className="flex-1 min-w-[140px] px-3 py-2.5 rounded-lg text-[13px]"
+                style={{
+                  background: "var(--input-bg)",
+                  border: "1px solid var(--input-border)",
+                  color: "var(--text-body)",
+                }}
+              />
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-lg text-[13px] font-semibold"
+                style={{
+                  background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
+                  color: "#fff",
+                }}
+              >
+                Create free account
+              </button>
+            </form>
+          </div>
+        )}
 
         {/* ── Pricing + features (idle only) ── */}
         {step === "idle" && (
