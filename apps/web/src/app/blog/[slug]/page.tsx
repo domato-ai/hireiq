@@ -7,13 +7,14 @@ export function generateStaticParams() {
   return BLOG_POSTS.map((post) => ({ slug: post.slug }));
 }
 
-export function generateMetadata({ params }: { params: { slug: string } }): Metadata {
-  const post = BLOG_POSTS.find((p) => p.slug === params.slug);
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const post = BLOG_POSTS.find((p) => p.slug === slug);
   if (!post) return {};
   return {
     title: post.title,
     description: post.description,
-    alternates: { canonical: `https://hireiq.domato.ai/blog/${post.slug}` },
+    alternates: { canonical: `https://hireiq.domato.ai/blog/${slug}` },
     openGraph: {
       title: post.title,
       description: post.description,
@@ -24,9 +25,10 @@ export function generateMetadata({ params }: { params: { slug: string } }): Meta
   };
 }
 
-export default function BlogPostPage({ params }: { params: { slug: string } }) {
-  const post = BLOG_POSTS.find((p) => p.slug === params.slug);
-  const content = BLOG_CONTENT[params.slug];
+export default async function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const post = BLOG_POSTS.find((p) => p.slug === slug);
+  const content = BLOG_CONTENT[slug];
 
   if (!post || !content) {
     return (
@@ -61,7 +63,7 @@ export default function BlogPostPage({ params }: { params: { slug: string } }) {
         </p>
 
         <div
-          className="prose-custom space-y-5 text-[14px] leading-[1.75]"
+          className="space-y-5 text-[14px] leading-[1.75]"
           style={{ color: "var(--text-body)" }}
           dangerouslySetInnerHTML={{ __html: content }}
         />
@@ -88,7 +90,7 @@ export default function BlogPostPage({ params }: { params: { slug: string } }) {
             Related articles
           </h3>
           <div className="space-y-3">
-            {BLOG_POSTS.filter((p) => p.slug !== params.slug).slice(0, 3).map((p) => (
+            {BLOG_POSTS.filter((p) => p.slug !== slug).slice(0, 3).map((p) => (
               <Link key={p.slug} href={`/blog/${p.slug}`} className="block text-[13px] hover:underline underline-offset-2"
                 style={{ color: "var(--text-muted)" }}>
                 {p.title}
