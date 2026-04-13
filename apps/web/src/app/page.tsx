@@ -1403,16 +1403,25 @@ export default function HomePage() {
       </div>
 
       {/* ── Footer ── */}
-      <footer className="relative z-10 px-6 py-6 max-w-5xl mx-auto" style={{ borderTop: "1px solid var(--divider)" }}>
-        <div className="flex items-center justify-between">
-          <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>
-            &copy; {new Date().getFullYear()} Domato AI Pty Ltd
-          </p>
-          <div className="flex items-center gap-4">
-            <Link href="/terms" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Terms</Link>
-            <Link href="/privacy" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Privacy</Link>
-            <Link href="/contact" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Contact</Link>
-            <Link href="/blog" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Blog</Link>
+      <footer className="relative z-10 px-6 py-8 max-w-5xl mx-auto" style={{ borderTop: "1px solid var(--divider)" }}>
+        <div className="flex flex-col items-center gap-4">
+          <a href="https://www.producthunt.com/products/hireiq?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-hireiq"
+            target="_blank" rel="noopener noreferrer">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img alt="HireIQ - Instantly see which candidates actually match your job | Product Hunt"
+              width={250} height={54}
+              src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1121861&theme=dark&t=1776050446508" />
+          </a>
+          <div className="flex items-center justify-between w-full">
+            <p className="text-[11px]" style={{ color: "var(--text-faint)" }}>
+              &copy; {new Date().getFullYear()} Domato AI Pty Ltd
+            </p>
+            <div className="flex items-center gap-4">
+              <Link href="/terms" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Terms</Link>
+              <Link href="/privacy" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Privacy</Link>
+              <Link href="/contact" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Contact</Link>
+              <Link href="/blog" className="text-[11px] transition-colors" style={{ color: "var(--text-faint)" }}>Blog</Link>
+            </div>
           </div>
         </div>
       </footer>
