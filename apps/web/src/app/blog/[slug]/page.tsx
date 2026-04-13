@@ -84,6 +84,35 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
           </Link>
         </div>
 
+        {/* Product Hunt */}
+        <div className="mt-6 flex justify-center">
+          <div style={{
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif",
+            border: "1px solid #e0e0e0", borderRadius: 12, padding: 20, maxWidth: 500,
+            background: "#fff", boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+              <img alt="HireIQ" src="https://ph-files.imgix.net/bbc1543c-2a99-4c31-b1c2-54d8eee33070.png?auto=format&fit=crop&w=80&h=80"
+                style={{ width: 64, height: 64, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: "#1a1a1a", lineHeight: 1.3 }}>HireIQ</h3>
+                <p style={{ margin: "4px 0 0", fontSize: 14, color: "#666", lineHeight: 1.4 }}>
+                  Instantly see which candidates actually match your job
+                </p>
+              </div>
+            </div>
+            <a href="https://www.producthunt.com/products/hireiq?embed=true&utm_source=embed&utm_medium=post_embed"
+              target="_blank" rel="noopener"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 4, marginTop: 12,
+                padding: "8px 16px", background: "#ff6154", color: "#fff",
+                textDecoration: "none", borderRadius: 8, fontSize: 14, fontWeight: 600,
+              }}>
+              Check it out on Product Hunt &rarr;
+            </a>
+          </div>
+        </div>
+
         {/* Related posts */}
         <div className="mt-12 pt-8" style={{ borderTop: "1px solid var(--divider)" }}>
           <h3 className="text-[13px] font-semibold uppercase tracking-wider mb-4" style={{ color: "var(--text-faint)" }}>
