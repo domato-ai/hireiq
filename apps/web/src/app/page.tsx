@@ -200,6 +200,13 @@ export default function HomePage() {
         const storedRef = localStorage.getItem("hireiq-ref");
         if (storedRef) setCampaign(storedRef);
       }
+      // Dev/screenshot hook — show sample results immediately when ?demo=1
+      if (params.get("demo") === "1") {
+        setAnalysisResult(SAMPLE_RESULT);
+        setIsSampleData(true);
+        setStep("results");
+        setExpandedId(SAMPLE_RESULT.candidates[0]?.id || null);
+      }
       if (params.get("upgraded") === "true") {
         setUpgraded(true);
         // Update stored user plan to pro
@@ -476,7 +483,7 @@ export default function HomePage() {
       />
 
       {/* ── Nav ── */}
-      <nav className="relative z-20 flex items-center justify-between px-6 md:px-10 py-5 max-w-5xl mx-auto">
+      <nav className="relative z-20 flex items-center justify-between px-6 md:px-10 py-5 max-w-[1400px] mx-auto">
         <NavLogo variant="dark" />
         <div className="flex items-center gap-4">
           {user ? (
@@ -499,8 +506,7 @@ export default function HomePage() {
             </>
           ) : (
             <>
-              <Link href="/signup" className="text-[13px] font-semibold px-4 py-2 rounded-lg transition-all duration-200"
-                style={{ background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)", color: "#fff", boxShadow: "0 0 12px rgba(124,92,255,0.2)" }}>
+              <Link href="/signup" className="text-[13px] font-semibold px-4 py-2 rounded-lg transition-all duration-200 hq-cta">
                 Sign up free
               </Link>
               <ThemeToggle />
@@ -521,38 +527,40 @@ export default function HomePage() {
       </nav>
 
       {/* ── Hero ── */}
-      <div className="relative z-10 flex flex-col items-center pt-16 md:pt-24 pb-20 px-6">
+      <div className={`relative z-10 flex flex-col items-center px-6 ${step === "results" ? "pt-8 md:pt-10 pb-12" : "pt-16 md:pt-24 pb-20"}`}>
         {/* Badge */}
         <div
           className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-8 home-stagger-1"
           style={{
-            background: "rgba(124,92,255,0.08)",
-            border: "1px solid rgba(124,92,255,0.15)",
+            background: "var(--accent-bg-soft)",
+            border: "1px solid var(--accent-border)",
           }}
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-[#7c5cff] metric-pulse" />
-          <span className="text-[12px] font-medium" style={{ color: "rgba(124,92,255,0.9)" }}>
+          <span className="w-1.5 h-1.5 rounded-full metric-pulse" style={{ background: "var(--accent)" }} />
+          <span className="text-[12px] font-medium" style={{ color: "var(--accent)" }}>
             {campaign === "outreach" ? "You were invited to try HireIQ" : "Evidence-first hiring decisions"}
           </span>
         </div>
 
         {/* Heading */}
         <h1
-          className="text-center font-display text-5xl md:text-6xl lg:text-7xl tracking-[-0.03em] leading-[1.05] max-w-3xl home-stagger-2"
+          className={`text-center font-display tracking-[-0.03em] leading-[1.05] max-w-3xl home-stagger-2 ${
+            step === "results" ? "text-4xl md:text-5xl" : "text-5xl md:text-6xl lg:text-7xl"
+          }`}
           style={{ color: "var(--text-heading)" }}
         >
           {step === "analyzing" ? (
             "Analyzing candidates"
           ) : step === "results" ? (
             <>
-              Here&rsquo;s your <span className="italic" style={{ color: "#a78bfa" }}>shortlist</span>
+              Here&rsquo;s your <span className="italic" style={{ color: "var(--accent)" }}>shortlist</span>
             </>
           ) : (
             <>
               {campaign === "outreach" ? (
-                <>See how your candidates <span className="italic" style={{ color: "#a78bfa" }}>stack up</span></>
+                <>See how your candidates <span className="italic" style={{ color: "var(--accent)" }}>stack up</span></>
               ) : (
-                <>Find the <span className="italic" style={{ color: "#a78bfa" }}>right</span> hire</>
+                <>Find the <span className="italic" style={{ color: "var(--accent)" }}>right</span> hire</>
               )}
             </>
           )}
@@ -576,12 +584,7 @@ export default function HomePage() {
           <div className="flex flex-col items-center gap-4 mt-6 mb-2 home-stagger-2">
             <button
               onClick={handleTrySample}
-              className="px-6 py-3 rounded-xl text-sm font-semibold transition-all duration-300 active:scale-[0.98]"
-              style={{
-                background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
-                color: "#fff",
-                boxShadow: "0 0 24px rgba(124,92,255,0.3), 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.15)",
-              }}
+              className="px-6 py-3 rounded-xl text-sm hq-cta"
             >
               See a sample ranking instantly
             </button>
@@ -600,8 +603,8 @@ export default function HomePage() {
         {/* ── Sample data banner in results ── */}
         {step === "results" && isSampleData && (
           <div
-            className="w-full max-w-[640px] mt-4 mb-2 px-4 py-3 rounded-xl flex items-center justify-between"
-            style={{ background: "rgba(124,92,255,0.08)", border: "1px solid rgba(124,92,255,0.2)" }}
+            className="w-full max-w-[1200px] mt-4 mb-2 px-4 py-3 rounded-xl flex items-center justify-between"
+            style={{ background: "var(--accent-bg-soft)", border: "1px solid var(--accent-border)" }}
           >
             <span className="text-[13px]" style={{ color: "var(--text-muted)" }}>
               Viewing sample data — <strong style={{ color: "var(--text-heading)" }}>upload your own resumes to get started</strong>
@@ -609,7 +612,7 @@ export default function HomePage() {
             <button
               onClick={handleStartFresh}
               className="px-3 py-1.5 rounded-lg text-[12px] font-semibold"
-              style={{ background: "rgba(124,92,255,0.15)", color: "#a78bfa" }}
+              style={{ background: "var(--accent-bg-hover)", color: "var(--accent)" }}
             >
               Start fresh
             </button>
@@ -619,17 +622,17 @@ export default function HomePage() {
         {/* ── Demo video ── */}
         {step === "idle" && (
           <div
-            className="w-full max-w-[640px] mt-8 mb-2 rounded-2xl overflow-hidden home-stagger-2"
+            className="w-full max-w-[960px] mt-8 mb-2 rounded-2xl overflow-hidden home-stagger-2"
             style={{
               border: "1px solid var(--card-border)",
-              boxShadow: "0 4px 32px rgba(0,0,0,0.2), 0 0 80px rgba(124,92,255,0.06)",
+              boxShadow: "0 4px 32px rgba(0,0,0,0.25), 0 0 60px var(--accent-glow)",
             }}
           >
             <div
               className="px-4 py-2.5 flex items-center gap-2"
               style={{ background: "var(--card-bg)", borderBottom: "1px solid var(--card-border)" }}
             >
-              <div className="w-2 h-2 rounded-full" style={{ background: "#7c5cff" }} />
+              <div className="w-2 h-2 rounded-full" style={{ background: "var(--accent)" }} />
               <span className="text-[12px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
                 See it in action
               </span>
@@ -656,7 +659,7 @@ export default function HomePage() {
         {/* ── Upgrade success banner ── */}
         {upgraded && (
           <div
-            className="w-full max-w-[640px] mb-6 rounded-2xl p-6 text-center"
+            className="w-full max-w-[960px] mb-6 rounded-2xl p-6 text-center"
             style={{
               background: "rgba(52,211,153,0.08)",
               border: "1px solid rgba(52,211,153,0.2)",
@@ -681,7 +684,7 @@ export default function HomePage() {
         {/* ── Error banner ── */}
         {error && (
           <div
-            className="w-full max-w-[640px] mb-4 px-4 py-3 rounded-xl text-sm"
+            className="w-full max-w-[960px] mb-4 px-4 py-3 rounded-xl text-sm"
             style={{ background: "var(--error-bg)", border: "1px solid var(--error-border)", color: "var(--error-text)" }}
           >
             {error}
@@ -690,12 +693,22 @@ export default function HomePage() {
 
         {/* ── Main card ── */}
         <div
-          className="w-full max-w-[640px] mt-12 rounded-2xl p-5 home-stagger-3"
-          style={{
-            background: "var(--card-bg)",
-            border: "1px solid var(--card-border)",
-            boxShadow: "var(--card-shadow), 0 0 80px rgba(124,92,255,0.04)",
-          }}
+          className={`w-full home-stagger-3 ${
+            step === "idle"
+              ? "mt-12 max-w-[960px] p-6 rounded-2xl"
+              : step === "results"
+              ? "mt-6 max-w-[1400px] px-2"
+              : "mt-12 max-w-[720px] p-6 rounded-2xl"
+          }`}
+          style={
+            step === "results"
+              ? undefined
+              : {
+                  background: "var(--card-bg)",
+                  border: "1px solid var(--card-border)",
+                  boxShadow: "var(--card-shadow), 0 0 60px var(--accent-glow)",
+                }
+          }
         >
           {step === "analyzing" ? (
             <div className="py-6 px-1">
@@ -714,8 +727,8 @@ export default function HomePage() {
                     className="h-full rounded-full transition-all duration-1000 ease-out"
                     style={{
                       width: `${progressSteps[progressStep]?.pct ?? 0}%`,
-                      background: "linear-gradient(90deg, #7c5cff 0%, #a78bfa 100%)",
-                      boxShadow: "0 0 8px rgba(124,92,255,0.4)",
+                      background: "var(--accent)",
+                      boxShadow: "0 0 12px var(--accent-glow)",
                     }}
                   />
                 </div>
@@ -746,8 +759,8 @@ export default function HomePage() {
                             </svg>
                           </div>
                         ) : isActive ? (
-                          <div className="w-5 h-5 rounded-full flex items-center justify-center analyzing-spinner" style={{ background: "rgba(124,92,255,0.1)" }}>
-                            <div className="w-2 h-2 rounded-full" style={{ background: "#7c5cff" }} />
+                          <div className="w-5 h-5 rounded-full flex items-center justify-center analyzing-spinner" style={{ background: "var(--accent-bg-soft)" }}>
+                            <div className="w-2 h-2 rounded-full" style={{ background: "var(--accent)" }} />
                           </div>
                         ) : (
                           <div className="w-5 h-5 rounded-full" style={{ background: "var(--input-bg)", border: "1px solid var(--card-border)" }} />
@@ -793,23 +806,59 @@ export default function HomePage() {
                     <span style={{ color: "#a78bfa" }}>({topCandidate?.overall_score ?? 0}/100)</span>
                   </span>
                 </div>
-                <button
-                  onClick={handleReset}
-                  className="text-[11px] px-2.5 py-1 rounded-lg transition-all duration-200"
-                  style={{
-                    color: "var(--text-muted)",
-                    border: "1px solid var(--card-border)",
-                    background: "var(--input-bg)",
-                  }}
-                >
-                  New analysis
-                </button>
+                <div className="flex items-center gap-2">
+                  {/* Share button */}
+                  <button
+                    onClick={async () => {
+                      if (!analysisResult) return;
+                      track("share_clicked");
+                      try {
+                        const res = await fetch(`${API_URL}/api/v1/shortlists`, {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ analysis: analysisResult }),
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.url) {
+                          await navigator.clipboard.writeText(data.url);
+                          setError("");
+                          alert("Link copied to clipboard!");
+                        }
+                      } catch { setError("Failed to generate share link"); }
+                    }}
+                    className="text-[11px] px-2.5 py-1 rounded-lg transition-all duration-200"
+                    style={{ color: "#a78bfa", border: "1px solid rgba(124,92,255,0.3)", background: "rgba(124,92,255,0.08)" }}
+                    title="Share shortlist"
+                  >
+                    Share
+                  </button>
+                  {/* PDF button */}
+                  <button
+                    onClick={() => {
+                      track("pdf_downloaded");
+                      window.print();
+                    }}
+                    className="text-[11px] px-2.5 py-1 rounded-lg transition-all duration-200"
+                    style={{ color: "var(--text-muted)", border: "1px solid var(--card-border)", background: "var(--input-bg)" }}
+                    title="Download as PDF"
+                  >
+                    PDF
+                  </button>
+                  <button
+                    onClick={handleReset}
+                    className="text-[11px] px-2.5 py-1 rounded-lg transition-all duration-200"
+                    style={{ color: "var(--text-muted)", border: "1px solid var(--card-border)", background: "var(--input-bg)" }}
+                  >
+                    New analysis
+                  </button>
+                </div>
               </div>
             </div>
           ) : (
             <>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               {/* ── JD Section ── */}
-              <div className="mb-4">
+              <div className="mb-0">
                 <div className="flex items-center justify-between mb-2.5">
                   <label className="text-[12px] font-medium uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
                     Job Description
@@ -844,7 +893,7 @@ export default function HomePage() {
                       value={jdText}
                       onChange={(e) => setJdText(e.target.value)}
                       placeholder="We're looking for a Senior Product Manager with 5+ years of B2B SaaS experience..."
-                      rows={4}
+                      rows={7}
                       className="w-full rounded-xl px-4 py-3.5 text-[13px] leading-relaxed placeholder:italic resize-none focus:outline-none transition-all duration-200"
                       style={{
                         background: "var(--input-bg)",
@@ -901,11 +950,8 @@ export default function HomePage() {
                 )}
               </div>
 
-              {/* ── Divider ── */}
-              <div className="h-px my-1" style={{ background: "var(--divider)" }} />
-
               {/* ── Resumes Section ── */}
-              <div className="mt-4 mb-5">
+              <div className="mt-0 mb-0">
                 <label className="text-[12px] font-medium uppercase tracking-wider mb-2.5 block" style={{ color: "var(--text-muted)" }}>
                   Resumes
                 </label>
@@ -957,7 +1003,7 @@ export default function HomePage() {
                           + Add more
                         </button>
                       </div>
-                      <div className="space-y-0.5 max-h-[140px] overflow-y-auto">
+                      <div className="space-y-0.5 max-h-[180px] overflow-y-auto">
                         {files.map((file, i) => (
                           <FileRow
                             key={file.name + file.size}
@@ -976,6 +1022,7 @@ export default function HomePage() {
                 </div>
               </div>
 
+              </div>
               {/* ── CTA Button ── */}
               {(() => {
                 const atLimit = usage !== null && usage.remaining === 0;
@@ -999,20 +1046,7 @@ export default function HomePage() {
                   <button
                     onClick={handleStart}
                     disabled={isDisabled}
-                    className="w-full py-3 rounded-xl text-sm font-semibold transition-all duration-300 active:scale-[0.98]"
-                    style={
-                      !isDisabled
-                        ? {
-                            background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
-                            color: "#fff",
-                            boxShadow: "0 0 24px rgba(124,92,255,0.3), 0 2px 8px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.15)",
-                          }
-                        : {
-                            background: "var(--btn-disabled-bg)",
-                            color: "var(--btn-disabled-text)",
-                            cursor: "not-allowed",
-                          }
-                    }
+                    className="w-full py-3 rounded-xl text-sm mt-5 hq-cta"
                   >
                     {buttonLabel}
                   </button>
@@ -1048,8 +1082,8 @@ export default function HomePage() {
           )}
         </div>
 
-        {/* ── Inline signup nudge (after results, for anonymous users) ── */}
-        {step === "results" && !user && (
+        {/* ── Inline signup nudge — rendered BELOW the workstation further down ── */}
+        {false && step === "results" && !user && (
           <div
             className="w-full max-w-[640px] mt-6 rounded-2xl p-5"
             style={{
@@ -1347,63 +1381,108 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* ── Results section ── */}
+        {/* ── Results section — newsroom workstation ── */}
         {step === "results" && (
-          <div ref={resultsRef} className="w-full max-w-[640px] mt-6">
-            {/* Compare bar */}
-            {selectedIds.size >= 2 && !compareMode && (
-              <div
-                className="mb-4 flex items-center justify-between px-4 py-3 rounded-xl"
-                style={{
-                  background: "rgba(124,92,255,0.08)",
-                  border: "1px solid rgba(124,92,255,0.2)",
-                }}
-              >
-                <span className="text-[13px] font-medium" style={{ color: "rgba(124,92,255,0.9)" }}>
-                  {selectedIds.size} candidates selected
-                </span>
-                <button
-                  onClick={() => setCompareMode(true)}
-                  className="text-[12px] font-semibold px-4 py-1.5 rounded-lg transition-all duration-200 active:scale-[0.97]"
-                  style={{
-                    background: "linear-gradient(135deg, #7c5cff 0%, #6346e0 100%)",
-                    color: "#fff",
-                    boxShadow: "0 0 16px rgba(124,92,255,0.3)",
-                  }}
-                >
-                  Compare →
-                </button>
-              </div>
-            )}
-
-            {/* Compare mode */}
+          <div ref={resultsRef} className="w-full max-w-[1400px] mt-8 mb-8">
             {compareMode ? (
               <CompareView
                 candidates={selectedCandidates}
                 onClose={() => setCompareMode(false)}
               />
             ) : (
-              <div className="space-y-2">
-                {sortedCandidates.map((candidate, idx) => (
-                  <CandidateCard
-                    key={candidate.id}
-                    candidate={candidate}
-                    rank={idx + 1}
-                    isExpanded={expandedId === candidate.id}
-                    isSelected={selectedIds.has(candidate.id)}
-                    onToggleExpand={() => toggleExpand(candidate.id)}
-                    onToggleSelect={(e) => toggleSelect(candidate.id, e)}
-                    animDelay={idx * 0.06}
-                  />
-                ))}
-              </div>
+              <WorkstationResults
+                candidates={sortedCandidates}
+                expandedId={expandedId}
+                selectedIds={selectedIds}
+                onSelect={toggleExpand}
+                onToggleShortlist={toggleSelect}
+                onCompare={() => setCompareMode(true)}
+                jdRequirements={analysisResult?.jd_requirements}
+              />
             )}
+          </div>
+        )}
+
+        {/* ── Signup nudge — below workstation for anonymous users ── */}
+        {step === "results" && !user && (
+          <div
+            className="w-full max-w-[720px] mt-2 mb-8 rounded-2xl p-5"
+            style={{
+              background: "var(--card-bg)",
+              border: "1px solid var(--card-border)",
+            }}
+          >
+            <p className="text-[14px] font-semibold mb-1" style={{ color: "var(--text-heading)" }}>
+              {isSampleData ? "Ready to try with your own resumes?" : "Like what you see?"}
+            </p>
+            <p className="text-[12px] mb-4" style={{ color: "var(--text-muted)" }}>
+              Create a free account to get 10 analyses/month. No credit card required.
+            </p>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const form = e.currentTarget;
+                const email = (form.elements.namedItem("email") as HTMLInputElement).value;
+                const password = (form.elements.namedItem("password") as HTMLInputElement).value;
+                if (!email || password.length < 8) return;
+                try {
+                  const res = await fetch(`${API_URL}/api/v1/auth/register`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ email, password, name: "" }),
+                  });
+                  const data = await res.json();
+                  if (!res.ok) throw new Error(data.detail || "Registration failed");
+                  localStorage.setItem("hireiq-token", data.access_token);
+                  localStorage.setItem("hireiq-user", JSON.stringify(data.user));
+                  setUser(data.user);
+                  setError("");
+                  fetchUsage();
+                  track("signup_completed", { source: "inline" });
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Something went wrong");
+                }
+              }}
+              className="flex gap-2 flex-wrap"
+            >
+              <input
+                name="email"
+                type="email"
+                placeholder="Email"
+                required
+                className="flex-1 min-w-[160px] px-3 py-2.5 rounded-lg text-[13px]"
+                style={{
+                  background: "var(--input-bg)",
+                  border: "1px solid var(--input-border)",
+                  color: "var(--text-body)",
+                }}
+              />
+              <input
+                name="password"
+                type="password"
+                placeholder="Password (8+ chars)"
+                required
+                minLength={8}
+                className="flex-1 min-w-[140px] px-3 py-2.5 rounded-lg text-[13px]"
+                style={{
+                  background: "var(--input-bg)",
+                  border: "1px solid var(--input-border)",
+                  color: "var(--text-body)",
+                }}
+              />
+              <button
+                type="submit"
+                className="px-5 py-2.5 rounded-lg text-[13px] hq-cta"
+              >
+                Create free account
+              </button>
+            </form>
           </div>
         )}
       </div>
 
       {/* ── Footer ── */}
-      <footer className="relative z-10 px-6 py-8 max-w-5xl mx-auto" style={{ borderTop: "1px solid var(--divider)" }}>
+      <footer className="relative z-10 px-6 py-8 max-w-[1400px] mx-auto" style={{ borderTop: "1px solid var(--divider)" }}>
         <div className="flex flex-col items-center gap-4">
           <a href="https://www.producthunt.com/products/hireiq?embed=true&utm_source=badge-featured&utm_medium=badge&utm_campaign=badge-hireiq"
             target="_blank" rel="noopener noreferrer">
@@ -1567,7 +1646,7 @@ function CandidateCard({
 
   return (
     <div
-      className="rounded-xl overflow-hidden candidate-card-enter"
+      className="rounded-xl overflow-hidden candidate-card-enter group"
       style={{
         background: isSelected ? "rgba(124,92,255,0.04)" : "var(--card-bg)",
         border: isSelected ? "1px solid rgba(124,92,255,0.25)" : "1px solid var(--card-border)",
@@ -1629,13 +1708,29 @@ function CandidateCard({
           </p>
         </div>
 
-        {/* Score + bar */}
+        {/* Copy + Score */}
         <div className="flex-shrink-0 flex flex-col items-end gap-1.5 w-24">
-          <div className="flex items-center gap-1">
-            <span className="font-display text-[18px] font-normal leading-none" style={{ color: sc }}>
-              {candidate.overall_score}
-            </span>
-            <span className="text-[10px]" style={{ color: "var(--text-faint)" }}>/100</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                track("copy_clicked");
+                const rec = ({strong_yes:"Strong Yes",yes:"Yes",maybe:"Maybe",no:"No"} as Record<string,string>)[candidate.recommendation] || "—";
+                const text = `${candidate.name || "Unknown"} — ${candidate.overall_score}% match (${rec})\n${candidate.current_title || ""}${candidate.current_company ? ` at ${candidate.current_company}` : ""}${candidate.location ? ` | ${candidate.location}` : ""}${candidate.years_experience ? ` | ${candidate.years_experience}yr` : ""}\nStrengths: ${candidate.strengths.slice(0,3).join(", ")}\nRisks: ${candidate.risks.length ? candidate.risks.slice(0,2).join(", ") : "None identified"}`;
+                navigator.clipboard.writeText(text);
+              }}
+              className="text-[10px] px-1.5 py-0.5 rounded transition-all opacity-0 group-hover:opacity-100"
+              style={{ color: "var(--text-faint)", border: "1px solid var(--card-border)" }}
+              title="Copy summary"
+            >
+              Copy
+            </button>
+            <div className="flex items-center gap-1">
+              <span className="font-display text-[18px] font-normal leading-none" style={{ color: sc }}>
+                {candidate.overall_score}
+              </span>
+              <span className="text-[10px]" style={{ color: "var(--text-faint)" }}>/100</span>
+            </div>
           </div>
           <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: "var(--input-bg)" }}>
             <div
@@ -2255,5 +2350,470 @@ function ResumeIcon() {
       <path d="M4 15c0-2.5 2.24-4.5 5-4.5s5 2 5 4.5" stroke="rgba(52,211,153,0.45)" strokeWidth="1.2" strokeLinecap="round" />
       <rect x="3" y="1.5" width="12" height="15" rx="2" stroke="rgba(52,211,153,0.3)" strokeWidth="1" />
     </svg>
+  );
+}
+
+/* ─── Workstation results layout ─────────────────────────────────────────── */
+
+function Fingerprint({ candidate }: { candidate: CandidateResult }) {
+  const entries = Object.values(candidate.factor_scores);
+  if (!entries.length) return null;
+  return (
+    <div className="hq-fp" aria-hidden>
+      {entries.map((f, i) => {
+        const h = Math.max(3, Math.round((f.score / 100) * 10));
+        const color = VERDICT_COLOR[f.verdict] ?? "var(--text-faint)";
+        return <span key={i} style={{ height: `${h}px`, background: color }} />;
+      })}
+    </div>
+  );
+}
+
+function VerdictChip({ verdict, label }: { verdict: string; label?: string }) {
+  const color = VERDICT_COLOR[verdict] ?? "var(--text-faint)";
+  const bg = VERDICT_BG[verdict] ?? "var(--input-bg)";
+  return (
+    <span className="hq-chip" style={{ color, background: bg, border: `1px solid ${color}33` }}>
+      <span className="hq-chip-dot" style={{ background: color }} />
+      {label ?? VERDICT_LABEL[verdict] ?? verdict}
+    </span>
+  );
+}
+
+function WorkstationResults({
+  candidates,
+  expandedId,
+  selectedIds,
+  onSelect,
+  onToggleShortlist,
+  onCompare,
+  jdRequirements,
+}: {
+  candidates: CandidateResult[];
+  expandedId: string | null;
+  selectedIds: Set<string>;
+  onSelect: (id: string) => void;
+  onToggleShortlist: (id: string, e: React.MouseEvent) => void;
+  onCompare: () => void;
+  jdRequirements: Record<string, unknown> | undefined;
+}) {
+  const active =
+    candidates.find((c) => c.id === expandedId) ?? candidates[0] ?? null;
+  const activeRank = active ? candidates.findIndex((c) => c.id === active.id) + 1 : 0;
+
+  const roleTitle =
+    (jdRequirements?.title as string | undefined) ??
+    (jdRequirements?.role as string | undefined) ??
+    "Role analysis";
+  const roleCompany = jdRequirements?.company as string | undefined;
+
+  return (
+    <div className="hq-workstation">
+      {/* ── LEFT RAIL ── */}
+      <aside className="hq-pane">
+        <div className="hq-pane-head">
+          <span>Candidates</span>
+          <span className="ml-auto font-mono" style={{ fontSize: 11, color: "var(--text-faint)" }}>
+            {candidates.length.toString().padStart(2, "0")}
+          </span>
+        </div>
+
+        {/* JD summary card */}
+        <div className="px-4 py-4" style={{ borderBottom: "1px solid var(--divider)" }}>
+          <div className="text-[10.5px] font-semibold uppercase tracking-wider" style={{ color: "var(--text-faint)" }}>
+            Role
+          </div>
+          <div className="mt-1 font-display italic leading-tight" style={{ color: "var(--text-heading)", fontSize: 22 }}>
+            {roleTitle}
+          </div>
+          {roleCompany && (
+            <div className="text-[12px] mt-0.5" style={{ color: "var(--text-muted)" }}>
+              @ {roleCompany}
+            </div>
+          )}
+        </div>
+
+        {/* Candidate rows */}
+        <div className="hq-scroll" style={{ maxHeight: "calc(72vh - 180px)" }}>
+          {candidates.map((c, idx) => {
+            const sc = scoreColor(c.overall_score);
+            const verdict =
+              c.recommendation === "strong_yes"
+                ? "strong"
+                : c.recommendation === "yes"
+                ? "partial"
+                : c.recommendation === "no"
+                ? "weak"
+                : "partial";
+            const barColor = VERDICT_COLOR[verdict] ?? "var(--text-faint)";
+            const isActive = active?.id === c.id;
+            const isSel = selectedIds.has(c.id);
+            return (
+              <div
+                key={c.id}
+                className="hq-row"
+                data-active={isActive}
+                onClick={() => onSelect(c.id)}
+              >
+                <div className="hq-row-bar" style={{ background: barColor }} />
+                <div className="hq-row-body">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="font-mono text-[10.5px] flex-shrink-0"
+                      style={{ color: isActive ? "var(--accent)" : "var(--text-faint)", width: 18 }}
+                    >
+                      {String(idx + 1).padStart(2, "0")}
+                    </span>
+                    <span className="hq-row-name">{c.name ?? "Unknown"}</span>
+                  </div>
+                  <div className="hq-row-meta" style={{ paddingLeft: 26 }}>
+                    {(c.current_title ?? "—")}
+                    {c.years_experience ? ` · ${c.years_experience}y` : ""}
+                    {c.location ? ` · ${c.location}` : ""}
+                  </div>
+                  <div style={{ paddingLeft: 26 }}>
+                    <Fingerprint candidate={c} />
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1.5 pr-2">
+                  <span className="hq-row-score" style={{ color: sc }}>
+                    {c.overall_score}
+                  </span>
+                  <button
+                    onClick={(e) => onToggleShortlist(c.id, e)}
+                    className="text-[10px] font-mono transition-colors"
+                    style={{
+                      color: isSel ? "var(--accent)" : "var(--text-faint)",
+                      letterSpacing: 0.4,
+                    }}
+                    title={isSel ? "Remove from shortlist" : "Add to shortlist"}
+                  >
+                    {isSel ? "★ SHORTLIST" : "+ shortlist"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </aside>
+
+      {/* ── MAIN PANE ── */}
+      <section className="hq-pane">
+        {active ? (
+          <EvidenceMain candidate={active} rank={activeRank} />
+        ) : (
+          <div className="p-10 text-center" style={{ color: "var(--text-muted)" }}>
+            Select a candidate to see the evidence.
+          </div>
+        )}
+      </section>
+
+      {/* ── RIGHT RAIL (hidden below 1440, controlled by .hq-workstation media query) ── */}
+      <aside className="hq-pane hq-shortlist-pane">
+        <div className="hq-pane-head">
+          <span>Shortlist</span>
+          <span className="ml-auto font-mono" style={{ fontSize: 11, color: "var(--text-faint)" }}>
+            {selectedIds.size.toString().padStart(2, "0")}
+          </span>
+        </div>
+
+        <div className="p-4 flex-1 hq-scroll">
+          {selectedIds.size === 0 ? (
+            <p className="text-[12px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+              Tap <span className="font-mono" style={{ color: "var(--text-body)" }}>+ shortlist</span> on the candidates you want to take forward.
+              Add two or more to compare side-by-side.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {candidates
+                .filter((c) => selectedIds.has(c.id))
+                .map((c) => {
+                  const sc = scoreColor(c.overall_score);
+                  return (
+                    <div key={c.id} className="hq-shortlist-card">
+                      <span
+                        className="font-mono text-[14px] font-medium"
+                        style={{ color: sc, width: 28, textAlign: "right" }}
+                      >
+                        {c.overall_score}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[12.5px] font-semibold truncate" style={{ color: "var(--text-heading)" }}>
+                          {c.name ?? "Unknown"}
+                        </div>
+                        <div className="text-[11px] truncate" style={{ color: "var(--text-muted)" }}>
+                          {c.current_title ?? "—"}
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => onToggleShortlist(c.id, e)}
+                        className="text-[11px]"
+                        style={{ color: "var(--text-faint)" }}
+                        title="Remove"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+
+        <div className="p-4" style={{ borderTop: "1px solid var(--divider)" }}>
+          <button
+            onClick={onCompare}
+            disabled={selectedIds.size < 2}
+            className="w-full py-2.5 rounded-lg text-[12.5px] hq-cta"
+          >
+            Compare {selectedIds.size >= 2 ? `${selectedIds.size} candidates` : "(select 2+)"} →
+          </button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function EvidenceMain({ candidate, rank }: { candidate: CandidateResult; rank: number }) {
+  const sc = scoreColor(candidate.overall_score);
+  const recMeta = RECOMMENDATION_META[candidate.recommendation] ?? RECOMMENDATION_META["maybe"];
+  const factorEntries = Object.entries(candidate.factor_scores);
+
+  return (
+    <div className="hq-scroll" style={{ maxHeight: "72vh" }}>
+      {/* Header */}
+      <div className="hq-main-head">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="flex items-center gap-3 mb-2">
+            <span
+              className="font-mono text-[11px] font-medium"
+              style={{
+                color: rank === 1 ? "var(--accent)" : "var(--text-faint)",
+                padding: "3px 8px",
+                borderRadius: 4,
+                background: rank === 1 ? "var(--accent-bg-soft)" : "var(--input-bg)",
+                border: `1px solid ${rank === 1 ? "var(--accent-border)" : "var(--divider)"}`,
+                letterSpacing: 0.04,
+              }}
+            >
+              RANK {String(rank).padStart(2, "0")}
+            </span>
+            <span
+              className="inline-flex items-center text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wide"
+              style={{ color: recMeta.color, background: recMeta.bg, border: `1px solid ${recMeta.border}` }}
+            >
+              {recMeta.label}
+            </span>
+          </div>
+          <h2 className="hq-candidate-name">{candidate.name ?? "Unknown"}</h2>
+          <p className="text-[13px] mt-1" style={{ color: "var(--text-muted)" }}>
+            {candidate.current_title ?? "—"}
+            {candidate.current_company ? ` · ${candidate.current_company}` : ""}
+            {candidate.location ? ` · ${candidate.location}` : ""}
+            {candidate.years_experience ? ` · ${candidate.years_experience} yrs` : ""}
+          </p>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div className="hq-bignum" style={{ color: sc }}>
+            {candidate.overall_score}
+          </div>
+          <div
+            className="font-mono text-[10.5px] mt-1"
+            style={{ color: "var(--text-faint)", letterSpacing: 0.06 }}
+          >
+            / 100 · OVERALL
+          </div>
+        </div>
+      </div>
+
+      {/* Summary */}
+      {candidate.summary && (
+        <div
+          className="px-6 py-5"
+          style={{ borderBottom: "1px solid var(--divider)" }}
+        >
+          <div
+            className="text-[10.5px] font-semibold uppercase tracking-wider mb-2"
+            style={{ color: "var(--text-faint)" }}
+          >
+            Recruiter summary
+          </div>
+          <p className="text-[14px] leading-relaxed" style={{ color: "var(--text-body)" }}>
+            {candidate.summary}
+          </p>
+        </div>
+      )}
+
+      {/* Factor section */}
+      <div>
+        <div
+          className="px-6 pt-5 pb-2 flex items-center justify-between"
+        >
+          <div
+            className="text-[10.5px] font-semibold uppercase tracking-wider"
+            style={{ color: "var(--text-faint)" }}
+          >
+            Evidence — {factorEntries.length} factors
+          </div>
+          <div className="text-[10.5px] font-mono" style={{ color: "var(--text-faint)" }}>
+            weight · score · verdict
+          </div>
+        </div>
+
+        {factorEntries.map(([key, detail]) => {
+          const cl = scoreColor(detail.score);
+          return (
+            <WorkstationFactor key={key} factorKey={key} detail={detail} scoreColorHex={cl} />
+          );
+        })}
+      </div>
+
+      {/* Strengths / Risks */}
+      <div
+        className="grid gap-0 px-0"
+        style={{ gridTemplateColumns: "1fr 1fr", borderTop: "1px solid var(--divider)" }}
+      >
+        <div
+          className="p-6"
+          style={{ borderRight: "1px solid var(--divider)" }}
+        >
+          <div
+            className="text-[10.5px] font-semibold uppercase tracking-wider mb-3"
+            style={{ color: "var(--verdict-strong)" }}
+          >
+            Strengths ({candidate.strengths.length})
+          </div>
+          <ul className="space-y-2">
+            {candidate.strengths.length === 0 && (
+              <li className="text-[12.5px]" style={{ color: "var(--text-faint)" }}>None noted.</li>
+            )}
+            {candidate.strengths.map((s, i) => (
+              <li key={i} className="flex gap-2 text-[13px] leading-snug" style={{ color: "var(--text-body)" }}>
+                <span className="flex-shrink-0" style={{ color: "var(--verdict-strong)" }}>+</span>
+                <span>{s}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="p-6">
+          <div
+            className="text-[10.5px] font-semibold uppercase tracking-wider mb-3"
+            style={{ color: "var(--verdict-weak)" }}
+          >
+            Risks ({candidate.risks.length})
+          </div>
+          <ul className="space-y-2">
+            {candidate.risks.length === 0 && (
+              <li className="text-[12.5px]" style={{ color: "var(--text-faint)" }}>None identified.</li>
+            )}
+            {candidate.risks.map((r, i) => (
+              <li key={i} className="flex gap-2 text-[13px] leading-snug" style={{ color: "var(--text-body)" }}>
+                <span className="flex-shrink-0" style={{ color: "var(--verdict-weak)" }}>!</span>
+                <span>{r}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      {candidate.missing_evidence.length > 0 && (
+        <div className="px-6 py-5" style={{ borderTop: "1px solid var(--divider)" }}>
+          <div
+            className="text-[10.5px] font-semibold uppercase tracking-wider mb-3"
+            style={{ color: "var(--text-faint)" }}
+          >
+            Missing evidence ({candidate.missing_evidence.length})
+          </div>
+          <ul className="space-y-1.5">
+            {candidate.missing_evidence.map((m, i) => (
+              <li key={i} className="flex gap-2 text-[12.5px] leading-snug" style={{ color: "var(--text-muted)" }}>
+                <span className="flex-shrink-0" style={{ color: "var(--text-faint)" }}>?</span>
+                <span>{m}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WorkstationFactor({
+  factorKey,
+  detail,
+  scoreColorHex,
+}: {
+  factorKey: string;
+  detail: FactorDetail;
+  scoreColorHex: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const label = detail.label ?? factorKey.replace(/_/g, " ");
+
+  return (
+    <>
+      <div className="hq-factor" onClick={() => setOpen((v) => !v)} style={{ cursor: "pointer" }}>
+        <div className="min-w-0">
+          <span className="hq-factor-label">{label}</span>
+          <span className="hq-factor-weight">{detail.weight}%</span>
+        </div>
+        <div className="hq-factor-bar">
+          <span style={{ width: `${detail.score}%`, background: scoreColorHex }} />
+        </div>
+        <div className="hq-factor-num" style={{ color: scoreColorHex }}>
+          {detail.score}
+        </div>
+        <VerdictChip verdict={detail.verdict} />
+      </div>
+
+      {open && (
+        <div className="hq-evidence-grid">
+          <div className="hq-evidence-col">
+            <h5>JD required</h5>
+            <p className="text-[12.5px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+              {detail.jd_required || "—"}
+            </p>
+            {detail.matched?.length > 0 && (
+              <div className="mt-3">
+                <h5 style={{ color: "var(--verdict-strong)" }}>Matched</h5>
+                <div>
+                  {detail.matched.map((m, i) => (
+                    <span key={i} className="hq-tag" data-kind="matched">
+                      ✓ {m}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="hq-evidence-col">
+            <h5>Candidate has</h5>
+            <p className="text-[12.5px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+              {detail.candidate_has || "—"}
+            </p>
+            {detail.missing?.length > 0 && (
+              <div className="mt-3">
+                <h5 style={{ color: "var(--verdict-weak)" }}>Missing</h5>
+                <div>
+                  {detail.missing.map((m, i) => (
+                    <span key={i} className="hq-tag" data-kind="missing">
+                      ✗ {m}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {detail.reasoning && (
+              <p
+                className="text-[12px] italic mt-3"
+                style={{ color: "var(--text-muted)", fontFamily: "var(--font-display)" }}
+              >
+                → {detail.reasoning}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
