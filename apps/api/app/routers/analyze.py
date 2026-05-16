@@ -11,6 +11,7 @@ from app.services.parser import extract_text
 from app.services.extraction import extract_resume_structured, extract_jd_requirements
 from app.services.embeddings import generate as generate_embedding
 from app.services.scoring import score_candidate
+from app.services.interview_kit import generate_interview_kit, generate_phone_screen
 from app.services.usage import check_quota_async, record_usage_async, LIMITS
 from app.routers.auth import verify_token
 
@@ -237,4 +238,79 @@ async def analyze(
         total_processed=len(candidates),
         total_skipped=skipped,
         usage=updated_quota,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Interview Kit + Phone Screen (Tier 1A/1B)
+# ---------------------------------------------------------------------------
+
+
+class CandidateInput(BaseModel):
+    """Minimal candidate shape needed to generate kits. Same fields the analyzer returns."""
+    name: str | None = None
+    current_title: str | None = None
+    current_company: str | None = None
+    years_experience: int | None = None
+    experience: list = []
+    skills: list = []
+    strengths: list[str] = []
+    risks: list[str] = []
+    missing_evidence: list[str] = []
+
+
+class InterviewKitRequest(BaseModel):
+    candidate: CandidateInput
+    jd_requirements: dict
+
+
+class InterviewKitResponse(BaseModel):
+    behavioral: list[dict]
+    technical: list[dict]
+    scorecard: list[dict]
+
+
+class PhoneScreenResponse(BaseModel):
+    opener: str
+    questions: list[dict]
+    closer: str
+
+
+@router.post("/interview-kit", response_model=InterviewKitResponse)
+async def interview_kit(body: InterviewKitRequest):
+    """Generate a tailored interview kit (behavioral + technical Qs + scorecard).
+
+    Stateless: caller passes the candidate object returned by /analyze plus the
+    jd_requirements dict from the same response. No quota — gated behind the
+    upstream analysis call.
+    """
+    candidate_dict = body.candidate.model_dump()
+    kit = await generate_interview_kit(
+        candidate=candidate_dict,
+        jd_requirements=body.jd_requirements,
+        strengths=body.candidate.strengths,
+        risks=body.candidate.risks,
+        missing_evidence=body.candidate.missing_evidence,
+    )
+    return InterviewKitResponse(
+        behavioral=kit.get("behavioral", []),
+        technical=kit.get("technical", []),
+        scorecard=kit.get("scorecard", []),
+    )
+
+
+@router.post("/phone-screen", response_model=PhoneScreenResponse)
+async def phone_screen(body: InterviewKitRequest):
+    """Generate a 5-7 question phone-screen script tailored to this candidate's gaps."""
+    candidate_dict = body.candidate.model_dump()
+    script = await generate_phone_screen(
+        candidate=candidate_dict,
+        jd_requirements=body.jd_requirements,
+        risks=body.candidate.risks,
+        missing_evidence=body.candidate.missing_evidence,
+    )
+    return PhoneScreenResponse(
+        opener=script.get("opener", ""),
+        questions=script.get("questions", []),
+        closer=script.get("closer", ""),
     )

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { NavLogo } from "@/components/ui/logo";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { track } from "@/lib/tracking";
+import InterviewPanel from "@/components/interview-panel";
 
 /* ─── API ────────────────────────────────────────────────────────────────── */
 
@@ -2500,7 +2501,7 @@ function WorkstationResults({
       {/* ── MAIN PANE ── */}
       <section className="hq-pane">
         {active ? (
-          <EvidenceMain candidate={active} rank={activeRank} />
+          <EvidenceMain candidate={active} rank={activeRank} jdRequirements={jdRequirements} />
         ) : (
           <div className="p-10 text-center" style={{ color: "var(--text-muted)" }}>
             Select a candidate to see the evidence.
@@ -2574,7 +2575,15 @@ function WorkstationResults({
   );
 }
 
-function EvidenceMain({ candidate, rank }: { candidate: CandidateResult; rank: number }) {
+function EvidenceMain({
+  candidate,
+  rank,
+  jdRequirements,
+}: {
+  candidate: CandidateResult;
+  rank: number;
+  jdRequirements: Record<string, unknown> | undefined;
+}) {
   const sc = scoreColor(candidate.overall_score);
   const recMeta = RECOMMENDATION_META[candidate.recommendation] ?? RECOMMENDATION_META["maybe"];
   const factorEntries = Object.entries(candidate.factor_scores);
@@ -2734,6 +2743,21 @@ function EvidenceMain({ candidate, rank }: { candidate: CandidateResult; rank: n
           </ul>
         </div>
       )}
+
+      <div className="px-6 py-5" style={{ borderTop: "1px solid var(--divider)" }}>
+        <InterviewPanel
+          candidate={{
+            name: candidate.name,
+            current_title: candidate.current_title,
+            current_company: candidate.current_company,
+            years_experience: candidate.years_experience,
+            strengths: candidate.strengths,
+            risks: candidate.risks,
+            missing_evidence: candidate.missing_evidence,
+          }}
+          jdRequirements={jdRequirements || {}}
+        />
+      </div>
     </div>
   );
 }
